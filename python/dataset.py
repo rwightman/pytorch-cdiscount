@@ -1,11 +1,10 @@
-""" Kaggle 'Understanding the Amazon' Pytorch Dataset
-Pytorch Dataset for 256x256 satellite patch analysis.
+"""
 
 """
-from collections import defaultdict
-import cv2
 import torch
 import torch.utils.data as data
+import cv2
+from collections import OrderedDict, defaultdict
 from torch.utils.data.sampler import Sampler
 from torchvision import datasets, transforms
 import random
@@ -28,8 +27,12 @@ def find_inputs(folder, types=IMG_EXTENSIONS):
         for rel_filename in files:
             base, ext = os.path.splitext(rel_filename)
             if ext.lower() in types:
-                abs_filename = os.path.join(root, rel_filename)
-                inputs.append((base, abs_filename))
+                parts = base.split('-')
+                assert len(parts) >= 2
+                prod_id = int(parts[0])
+                img_num = int(parts[1])
+                filename = os.path.join(root, rel_filename)
+                inputs.append((prod_id, img_num, filename))
     return inputs
 
 
@@ -62,7 +65,8 @@ class CDiscountDataset(data.Dataset):
     def __init__(
             self,
             input_root,
-            target_file='',
+            metadata_file='prod_metadata.csv',
+            category_file='category_map.csv',
             train=False,
             fold=0,
             img_size=(180, 180),
@@ -73,34 +77,36 @@ class CDiscountDataset(data.Dataset):
         inputs = find_inputs(input_root, types=['.jpg'])
         if len(inputs) == 0:
             raise (RuntimeError("Found 0 images in : " + input_root))
+        inputs_set = {prod_id for prod_id, _, _ in inputs}
+        print(len(inputs_set))
 
-        if target_file:
-            target_df = pd.read_csv(target_file)
+        category_df = pd.read_csv(os.path.join(input_root, category_file))
+        self.category_to_label1 = dict(zip(category_df.category_id, category_df.level1_label))
+        self.category_to_label2 = dict(zip(category_df.category_id, category_df.level2_label))
+        self.category_to_label3 = dict(zip(category_df.category_id, category_df.category_label))
+
+        if metadata_file:
+            target_df = pd.read_csv(os.path.join(input_root, metadata_file))
             if train:
-                target_df = target_df[target_df['fold'] != fold]
+                target_df = target_df[target_df['cv'] != fold]
             else:
-                target_df = target_df[target_df['fold'] == fold]
-            target_df.drop(['fold'], 1, inplace=True)
+                target_df = target_df[target_df['cv'] == fold]
 
-            input_dict = dict(inputs)
-            print(len(input_dict), len(target_df.index))
-            target_df = target_df[target_df.image_name.map(lambda x: x in input_dict)]
+            target_df.set_index(['prod_id'], inplace=True)
+            target_df = target_df[target_df.index.isin(inputs_set)]
+            print(len(target_df.index))
 
-            target_df['filename'] = target_df.image_name.map(lambda x: input_dict[x])
-            self.inputs = target_df['filename'].tolist()
+            self.inputs = [t for t in inputs if t[0] in target_df.index]
+            print(len(self.inputs))
 
-            target_df['label'] = target_df.category_id.map(lambda x: category_to_label[x])
-            self.target_array = target_df.as_matrix(['label'])
-            self.target_array = torch.from_numpy(self.target_array)
+            self.targets = dict(zip(target_df.index, target_df.category_id))
+            print(len(self.targets))
         else:
             assert not train
-            inputs = sorted(inputs, key=lambda x: natural_key(x[0]))
-            self.target_array = None
-            self.inputs = [x[1] for x in inputs]
+            self.inputs = sorted(inputs, key=lambda x: natural_key(x[0]))
+            self.targets = None
 
         self.train = train
-        self.dataset_mean = [0.31535792, 0.34446435, 0.30275137]
-        self.dataset_std = [0.05338271, 0.04247036, 0.03543708]
         self.img_size = img_size
 
         if not train:
@@ -111,16 +117,18 @@ class CDiscountDataset(data.Dataset):
         if transform is None:
             tfs = [transforms.ToTensor()]
             if self.train:
-                tfs.append(mytransforms.ColorJitter(brightness=0.01, contrast=0.01, saturation=0.01))
+                tfs.append(mytransforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1))
             if normalize == 'le':
                 tfs.append(mytransforms.LeNormalize())
             else:
-                tfs.append(transforms.Normalize(self.dataset_mean, self.dataset_std))
+                normalize = transforms.Normalize(
+                    mean=[124 / 255, 117 / 255, 104 / 255],
+                    std=[1 / (.0167 * 255)] * 3)
+                tfs.append(normalize)
             self.transform = transforms.Compose(tfs)
 
-    def _load_input(self, index):
-        path = self.inputs[index]
-        img = cv2.imread(path)
+    def _load_input(self, filename):
+        img = cv2.imread(filename)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         return img
 
@@ -226,9 +234,14 @@ class CDiscountDataset(data.Dataset):
             index = index // len(self.test_aug)
         else:
             aug_index = 0
-        input_img = self._load_input(index)
-        if self.target_array is not None:
-            target_tensor = self.target_array[index]
+
+        prod_id, img_num, filename = self.inputs[index]
+        input_img = self._load_input(filename)
+
+        if self.targets is not None:
+            category_id = self.targets[prod_id]
+            target_label = self.category_to_label3[category_id]
+            target_tensor = target_label.item()
         else:
             target_tensor = torch.zeros(1)
 
@@ -294,3 +307,23 @@ class WeightedRandomOverSampler(Sampler):
 
     def __len__(self):
         return self.num_samples
+
+
+def test():
+    dataset = CDiscountDataset(
+        '/data/f/cdiscount/train',
+        train=True
+    )
+
+    stats = []
+    ind = np.random.permutation(len(dataset))
+    for i in ind[:len(dataset)//4]:
+        mean_std = cv2.meanStdDev(dataset[i])
+        if i % 100 == 0:
+            print(mean_std)
+        stats.append(mean_std)
+    print(np.mean(stats, axis=0))
+
+
+if __name__ == '__main__':
+    test()

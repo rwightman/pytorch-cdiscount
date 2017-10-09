@@ -47,7 +47,7 @@ parser.add_argument('--pretrained', action='store_true', default=False,
                     help='Start with pretrained version of specified network (if avail)')
 parser.add_argument('--img-size', type=int, default=224, metavar='N',
                     help='Image patch size (default: 224)')
-parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
 parser.add_argument('--epochs', type=int, default=200, metavar='N',
                     help='number of epochs to train (default: 2)')
@@ -71,7 +71,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                     help='how many batches to wait before logging training status')
-parser.add_argument('--num-processes', type=int, default=1, metavar='N',
+parser.add_argument('-j', '--workers', type=int, default=2, metavar='N',
                     help='how many training processes to use (default: 1)')
 parser.add_argument('--no-tb', action='store_true', default=False,
                     help='disables tensorboard')
@@ -108,8 +108,7 @@ def main():
         datetime.now().strftime("%Y%m%d-%H%M%S"),
         args.model,
         str(args.img_size),
-        'f'+str(args.fold),
-        'tif' if args.tif else 'jpg'])
+        'f'+str(args.fold)])
     output_dir = get_outdir(output_base, 'train', exp_name)
 
     batch_size = args.batch_size
@@ -119,9 +118,23 @@ def main():
 
     torch.manual_seed(args.seed)
 
+    model = model_factory.create_model(
+        args.model,
+        pretrained=args.pretrained,
+        num_classes=1000,
+        drop_rate=args.drop,
+        global_pool=args.gp)
+
+    model.reset_classifier(num_classes=num_classes)
+
+    if args.num_gpu > 1:
+        model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu))).cuda()
+    else:
+        model.cuda()
+
+
     dataset_train = CDiscountDataset(
         train_input_root,
-        train_labels_file,
         train=True,
         img_size=img_size,
         fold=args.fold,
@@ -139,7 +152,6 @@ def main():
 
     dataset_eval = CDiscountDataset(
         train_input_root,
-        train_labels_file,
         train=False,
         img_size=img_size,
         test_aug=args.tta,
@@ -153,18 +165,7 @@ def main():
         num_workers=args.num_processes
     )
 
-    model = model_factory.create_model(
-        args.model,
-        pretrained=args.pretrained,
-        num_classes=num_classes,
-        drop_rate=args.drop,
-        global_pool=args.gp)
 
-    if not args.no_cuda:
-        if args.num_gpu > 1:
-            model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu))).cuda()
-        else:
-            model.cuda()
 
     if args.opt.lower() == 'sgd':
         optimizer = optim.SGD(
@@ -207,10 +208,12 @@ def main():
             if sparse_checkpoint:
                 print("Loading sparse model")
                 dense_sparse_dense.sparsify(model, sparsity=0.)  # ensure sparsity_masks exist in model definition
+
             model.load_state_dict(checkpoint['state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer'])
             print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
             start_epoch = checkpoint['epoch']
+
             if args.sparse and not sparse_checkpoint:
                 print("Sparsifying loaded model")
                 dense_sparse_dense.sparsify(model, sparsity=0.5)
@@ -336,6 +339,7 @@ def train_epoch(
         target_var = autograd.Variable(target)
 
         output = model(input_var)
+
         loss = loss_fn(output, target_var)
         losses_m.update(loss.data[0], input_var.size(0))
 

@@ -24,7 +24,7 @@ __all__ = ['DPN', 'dpn68', 'dpn92', 'dpn98', 'dpn131', 'dpn107']
 # If anyone able to provide direct link hosting, more than happy to fill these out.. -rwightman
 model_urls = {
     'dpn68': '',
-    'dpn68b_extra': '',
+    'dpn68b_extra': 'dpn68_extra-87733ef7.pth',
     'dpn92': '',
     'dpn92_extra': '',
     'dpn98': '',
