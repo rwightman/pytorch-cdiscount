@@ -89,7 +89,7 @@ def create_model(
     if 'test_time_pool' in kwargs:
         test_time_pool = kwargs.pop('test_time_pool')
     else:
-        test_time_pool = True
+        test_time_pool = False
 
     if model_name == 'dpn68':
         model = dpn68(

@@ -117,7 +117,7 @@ class CDiscountDataset(data.Dataset):
         if transform is None:
             tfs = [transforms.ToTensor()]
             if self.train:
-                tfs.append(mytransforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1))
+                tfs.append(mytransforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
             if normalize == 'le':
                 tfs.append(mytransforms.LeNormalize())
             else:
@@ -135,9 +135,9 @@ class CDiscountDataset(data.Dataset):
     def _random_crop_and_transform(self, input_img, scale_range=(1.0, 1.0), rot=0.0):
         angle = 0.
         hflip = random.random() < 0.5
-        vflip = random.random() < 0.5
-        trans = random.random() < 0.5
-        do_rotate = (rot > 0 and random.random() < 0.2) if not hflip and not vflip else False
+        vflip = False  # random.random() < 0.5
+        trans = random.random() < 0.25
+        do_rotate = (rot > 0 and random.random() < 0.25) if not hflip and not vflip else False
         h, w = input_img.shape[:2]
 
         # Favour rotation/scale choices that involve cropping within image bounds

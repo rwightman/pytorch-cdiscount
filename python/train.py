@@ -147,7 +147,7 @@ def main():
         batch_size=batch_size,
         shuffle=True,
         #sampler=sampler,
-        num_workers=args.num_processes
+        num_workers=args.workers
     )
 
     dataset_eval = CDiscountDataset(
@@ -160,12 +160,10 @@ def main():
 
     loader_eval = data.DataLoader(
         dataset_eval,
-        batch_size=batch_size,
+        batch_size=4*batch_size,
         shuffle=False,
-        num_workers=args.num_processes
+        num_workers=args.workers
     )
-
-
 
     if args.opt.lower() == 'sgd':
         optimizer = optim.SGD(
@@ -253,10 +251,12 @@ def main():
     if not args.resume and args.ft_epochs > 0.:
         if args.opt.lower() == 'adam':
             finetune_optimizer = optim.Adam(
-                model.get_fc().parameters(), lr=args.ft_lr, weight_decay=args.weight_decay)
+                model.get_classifier().parameters(),
+                lr=args.ft_lr, weight_decay=args.weight_decay)
         else:
             finetune_optimizer = optim.SGD(
-                model.get_fc().parameters(), lr=args.ft_lr, momentum=args.momentum, weight_decay=args.weight_decay)
+                model.get_classifier().parameters(),
+                lr=args.ft_lr, momentum=args.momentum, weight_decay=args.weight_decay)
 
         finetune_epochs_int = int(np.ceil(args.ft_epochs))
         finetune_final_batches = int(np.ceil((1 - (finetune_epochs_int - args.ft_epochs)) * len(loader_train)))
@@ -268,7 +268,7 @@ def main():
                 batch_limit = 0
             train_epoch(
                 fepoch, model, loader_train, finetune_optimizer, loss_fn, args,
-                class_weights_norm, output_dir, batch_limit=batch_limit)
+                output_dir=output_dir, batch_limit=batch_limit)
             step = fepoch * len(loader_train)
             validate(step, model, loader_eval, loss_fn, args, output_dir)
 
@@ -279,10 +279,13 @@ def main():
                 adjust_learning_rate(optimizer, epoch, initial_lr=args.lr, decay_epochs=args.decay_epochs)
 
             train_metrics = train_epoch(
-                epoch, model, loader_train, optimizer, loss_fn, args, output_dir, exp=exp)
+                epoch, model, loader_train, optimizer, loss_fn, args,
+                output_dir=output_dir, exp=exp)
 
             step = epoch * len(loader_train)
-            eval_metrics = validate(step, model, loader_eval, loss_fn, args, output_dir, exp=exp)
+            eval_metrics = validate(
+                step, model, loader_eval, loss_fn, args,
+                output_dir=output_dir, exp=exp)
 
             if lr_scheduler is not None:
                 lr_scheduler.step(eval_metrics['eval_loss'])
