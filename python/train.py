@@ -118,10 +118,16 @@ def main():
 
     torch.manual_seed(args.seed)
 
+    # FIXME hackish, really don't care about original class count here, need a way to not require that
+    if 'inception' in args.model:
+        num_classes_init = 1001
+    else:
+        num_classes_init = 1000
+
     model = model_factory.create_model(
         args.model,
         pretrained=args.pretrained,
-        num_classes=1000,
+        num_classes=num_classes_init,
         drop_rate=args.drop,
         global_pool=args.gp)
 
