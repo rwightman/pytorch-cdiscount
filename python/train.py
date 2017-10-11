@@ -50,6 +50,8 @@ parser.add_argument('--img-size', type=int, default=224, metavar='N',
                     help='Image patch size (default: 224)')
 parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
+parser.add_argument('-s', '--initial-batch-size', type=int, default=0, metavar='N',
+                    help='initial input batch size for training (default: 0)')
 parser.add_argument('--epochs', type=int, default=200, metavar='N',
                     help='number of epochs to train (default: 2)')
 parser.add_argument('--decay-epochs', type=int, default=15, metavar='N',
@@ -99,14 +101,10 @@ parser.add_argument('--class-weights', action='store_true', default=False,
 def main():
     args = parser.parse_args()
 
-    train_input_root = os.path.join(args.data)
-    train_labels_file = './data/labels.csv'
-
     if args.output:
         output_base = args.output
     else:
         output_base = './output'
-
     exp_name = '-'.join([
         datetime.now().strftime("%Y%m%d-%H%M%S"),
         args.model,
@@ -114,6 +112,7 @@ def main():
         'f'+str(args.fold)])
     output_dir = get_outdir(output_base, 'train', exp_name)
 
+    train_input_root = os.path.join(args.data)
     batch_size = args.batch_size
     num_epochs = args.epochs
     img_size = (args.img_size, args.img_size)
@@ -151,8 +150,11 @@ def main():
         normalize=normalize
     )
 
-    #sampler = WeightedRandomOverSampler(dataset_train.get_sample_weights())
-
+    #sampler = WeightedRandomOverSampler(dataset_train.get_sample_weights
+    if args.initial_batch_size:
+        batch_size = adjust_batch_size(
+            epoch=0, initial_bs=args.initial_batch_size, target_bs=args.batch_size)
+        print('Setting batch-size to %d' % batch_size)
     loader_train = data.DataLoader(
         dataset_train,
         batch_size=batch_size,
@@ -173,7 +175,7 @@ def main():
 
     loader_eval = data.DataLoader(
         dataset_eval,
-        batch_size=4*batch_size,
+        batch_size=4 * args.batch_size,
         pin_memory=True,
         shuffle=False,
         num_workers=args.workers
@@ -291,6 +293,20 @@ def main():
         for epoch in range(start_epoch, num_epochs + 1):
             if args.decay_epochs:
                 adjust_learning_rate(optimizer, epoch, initial_lr=args.lr, decay_epochs=args.decay_epochs)
+
+            if args.initial_batch_size:
+                next_batch_size = adjust_batch_size(
+                    epoch, initial_bs=args.initial_batch_size, target_bs=args.batch_size)
+                if next_batch_size > batch_size:
+                    print("Changing batch size from %d to %d" % (batch_size, next_batch_size))
+                    batch_size = next_batch_size
+                    loader_train = data.DataLoader(
+                        dataset_train,
+                        batch_size=batch_size,
+                        pin_memory=True,
+                        shuffle=True,
+                        # sampler=sampler,
+                        num_workers=args.workers)
 
             train_metrics = train_epoch(
                 epoch, model, loader_train, optimizer, loss_fn, args,
@@ -489,6 +505,27 @@ def adjust_learning_rate(optimizer, epoch, initial_lr, decay_epochs=30):
         param_group['lr'] = lr
 
 
+def adjust_batch_size(epoch, initial_bs, target_bs, decay_epochs=1):
+    batch_size = min(target_bs, initial_bs * (2 ** (epoch // decay_epochs)))
+    return batch_size
+
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the precision@k for the specified values of k"""
+    maxk = max(topk)
+    batch_size = target.size(0)
+
+    _, pred = output.topk(maxk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+    res = []
+    for k in topk:
+        correct_k = correct[:k].view(-1).float().sum(0)
+        res.append(correct_k.mul_(100.0 / batch_size))
+    return res
+
+
 class CheckpointSaver:
     def __init__(
             self,
@@ -562,22 +599,6 @@ class CheckpointSaver:
             return files[0]
         else:
             return ''
-
-
-def accuracy(output, target, topk=(1,)):
-    """Computes the precision@k for the specified values of k"""
-    maxk = max(topk)
-    batch_size = target.size(0)
-
-    _, pred = output.topk(maxk, 1, True, True)
-    pred = pred.t()
-    correct = pred.eq(target.view(1, -1).expand_as(pred))
-
-    res = []
-    for k in topk:
-        correct_k = correct[:k].view(-1).float().sum(0)
-        res.append(correct_k.mul_(100.0 / batch_size))
-    return res
 
 
 if __name__ == '__main__':
