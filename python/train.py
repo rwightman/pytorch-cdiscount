@@ -3,6 +3,7 @@ import csv
 import os
 import shutil
 import time
+import glob
 import numpy as np
 from collections import OrderedDict
 from datetime import datetime
@@ -71,6 +72,8 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=50, metavar='N',
                     help='how many batches to wait before logging training status')
+parser.add_argument('--recovery-interval', type=int, default=1000, metavar='N',
+                    help='how many batches to wait before writing recovery checkpoint')
 parser.add_argument('-j', '--workers', type=int, default=2, metavar='N',
                     help='how many training processes to use (default: 1)')
 parser.add_argument('--no-tb', action='store_true', default=False,
@@ -114,15 +117,17 @@ def main():
     batch_size = args.batch_size
     num_epochs = args.epochs
     img_size = (args.img_size, args.img_size)
-    num_classes = 5270 #FIXME
+    num_classes = 5270 # FIXME
 
     torch.manual_seed(args.seed)
 
     # FIXME hackish, really don't care about original class count here, need a way to not require that
     if 'inception' in args.model:
         num_classes_init = 1001
+        normalize = 'le'
     else:
         num_classes_init = 1000
+        normalize = 'torchvision'
 
     model = model_factory.create_model(
         args.model,
@@ -138,12 +143,12 @@ def main():
     else:
         model.cuda()
 
-
     dataset_train = CDiscountDataset(
         train_input_root,
         train=True,
         img_size=img_size,
         fold=args.fold,
+        normalize=normalize
     )
 
     #sampler = WeightedRandomOverSampler(dataset_train.get_sample_weights())
@@ -151,6 +156,7 @@ def main():
     loader_train = data.DataLoader(
         dataset_train,
         batch_size=batch_size,
+        pin_memory=True,
         shuffle=True,
         #sampler=sampler,
         num_workers=args.workers
@@ -162,11 +168,13 @@ def main():
         img_size=img_size,
         test_aug=args.tta,
         fold=args.fold,
+        normalize=normalize,
     )
 
     loader_eval = data.DataLoader(
         dataset_eval,
         batch_size=4*batch_size,
+        pin_memory=True,
         shuffle=False,
         num_workers=args.workers
     )
@@ -253,6 +261,8 @@ def main():
     else:
         exp = None
 
+    saver = CheckpointSaver()
+
     # Optional fine-tune of only the final classifier weights for specified number of epochs (or part of)
     if not args.resume and args.ft_epochs > 0.:
         if args.opt.lower() == 'adam':
@@ -286,7 +296,20 @@ def main():
 
             train_metrics = train_epoch(
                 epoch, model, loader_train, optimizer, loss_fn, args,
-                output_dir=output_dir, exp=exp)
+                saver=saver, output_dir=output_dir, exp=exp)
+
+            # save a recovery in case validation blows up
+            saver.save_recovery({
+                'epoch': epoch + 1,
+                'arch': args.model,
+                'sparse': args.sparse,
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'args': args,
+                'gp': args.gp,
+                },
+                epoch=epoch + 1,
+                batch_idx=0)
 
             step = epoch * len(loader_train)
             eval_metrics = validate(
@@ -305,23 +328,18 @@ def main():
                     dw.writeheader()
                 dw.writerow(rowd)
 
-            best = False
-            if best_loss is None or eval_metrics['eval_loss'] < best_loss[1]:
-                best_loss = (epoch, eval_metrics['eval_loss'])
-                best = True
-
-            save_checkpoint({
+            # save proper checkpoint with eval metric
+            saver.save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.model,
                 'sparse': args.sparse,
-                'state_dict':  model.state_dict(),
+                'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'args': args,
                 'gp': args.gp,
                 },
-                is_best=best,
-                filename='checkpoint-%d.pth.tar' % epoch,
-                output_dir=output_dir)
+                epoch=epoch + 1,
+                metric=eval_metrics['eval_loss'])
 
     except KeyboardInterrupt:
         pass
@@ -330,7 +348,7 @@ def main():
 
 def train_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
-        output_dir='', exp=None, batch_limit=0):
+        saver=None, output_dir='', exp=None, batch_limit=0):
 
     epoch_step = (epoch - 1) * len(loader)
     batch_time_m = AverageMeter()
@@ -386,6 +404,19 @@ def train_epoch(
                     padding=0,
                     normalize=True)
 
+        if saver is not None and batch_idx % args.recovery_interval == 0:
+            saver.save_recovery({
+                'epoch': epoch,
+                'arch': args.model,
+                'sparse': args.sparse,
+                'state_dict':  model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'args': args,
+                'gp': args.gp,
+                },
+                epoch=epoch,
+                batch_idx=batch_idx)
+
         end = time.time()
 
         if batch_limit and batch_idx >= batch_limit:
@@ -403,8 +434,6 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
     model.eval()
 
     end = time.time()
-    output_list = []
-    target_list = []
     for i, (input, target, _) in enumerate(loader):
         input, target = input.cuda(), target.cuda()
         input_var = autograd.Variable(input, volatile=True)
@@ -422,14 +451,10 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
         loss = loss_fn(output, target_var)
         losses_m.update(loss.data[0], input.size(0))
 
-        # output non-linearities and metrics
+        # metrics
         prec1, prec5 = accuracy(output.data, target, topk=(1, 3))
         prec1_m.update(prec1[0], output.size(0))
         prec5_m.update(prec5[0], output.size(0))
-
-        # copy to CPU and collect
-        target_list.append(target.cpu().numpy())
-        output_list.append(output.data.cpu().numpy())
 
         batch_time_m.update(time.time() - end)
         end = time.time()
@@ -466,11 +491,79 @@ def adjust_learning_rate(optimizer, epoch, initial_lr, decay_epochs=30):
         param_group['lr'] = lr
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar', output_dir=''):
-    save_path = os.path.join(output_dir, filename)
-    torch.save(state, save_path)
-    if is_best:
-        shutil.copyfile(save_path, os.path.join(output_dir, 'model_best.pth.tar'))
+class CheckpointSaver:
+    def __init__(
+            self,
+            checkpoint_prefix='checkpoint',
+            recovery_prefix='recovery',
+            checkpoint_dir='',
+            recovery_dir='',
+            checkpoint_history=10):
+
+        self.checkpoint_files = []
+        self.best_metric = None
+        self.worst_metric = None
+        self.checkpoint_history = checkpoint_history
+        assert self.checkpoint_history >= 1
+        self.curr_recovery_file = ''
+        self.last_recovery_file = ''
+        self.checkpoint_dir = checkpoint_dir
+        self.recovery_dir = recovery_dir
+        self.save_prefix = checkpoint_prefix
+        self.recovery_prefix = recovery_prefix
+        self.extension = '.pth.tar'
+
+    def save_checkpoint(self, state, epoch, metric=None):
+        worst_metric = self.checkpoint_files[-1] if self.checkpoint_files else None
+        if len(self.checkpoint_files) < self.checkpoint_history or metric < worst_metric:
+            if len(self.checkpoint_files) >= self.checkpoint_history:
+                self._cleanup_checkpoints(1)
+
+            filename = '-'.join([self.save_prefix, str(epoch)]) + self.extension
+            save_path = os.path.join(self.checkpoint_dir, filename)
+            if metric is not None:
+                state['metric'] = metric
+            torch.save(state, save_path)
+            self.checkpoint_files.append((save_path, metric))
+            self.checkpoint_files = sorted(self.checkpoint_files, key=lambda x: x[1])
+
+            if metric is not None and (self.best_metric is None or metric < self.best_metric[1]):
+                self.best_metric = (epoch, metric)
+                shutil.copyfile(save_path, os.path.join(self.checkpoint_dir, 'model_best' + self.extension))
+
+    def _cleanup_checkpoints(self, trim=0):
+        trim = max(len(self.checkpoint_files), trim)
+        if len(self.checkpoint_files) <= self.checkpoint_history - trim:
+            return
+        to_delete = self.checkpoint_files[self.checkpoint_history - trim:]
+        for d in to_delete:
+            try:
+                print('Cleaning checkpoint', d)
+                os.remove(d[1])
+            except Exception as e:
+                print('Exception (%s) while deleting checkpoint' % str(e))
+
+    def save_recovery(self, state, epoch, batch_idx):
+        filename = '-'.join([self.recovery_prefix, str(epoch), str(batch_idx)]) + self.extension
+        save_path = os.path.join(self.recovery_dir, filename)
+        torch.save(state, save_path)
+        if os.path.exists(self.last_recovery_file):
+            try:
+                print('Cleaning recovery', self.last_recovery_file)
+                os.remove(self.last_recovery_file)
+            except Exception as e:
+                print("Exception (%s) while removing %s" % (str(e), self.last_recovery_file))
+        self.last_recovery_file = self.curr_recovery_file
+        self.curr_recovery_file = save_path
+
+    def find_recovery(self):
+        recovery_path = os.path.join(self.recovery_dir, self.recovery_prefix)
+        files = glob.glob(recovery_path + '*' + self.extension)
+        files = sorted(files)
+        if len(files):
+            return files[0]
+        else:
+            return ''
 
 
 def accuracy(output, target, topk=(1,)):
