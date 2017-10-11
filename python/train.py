@@ -54,6 +54,8 @@ parser.add_argument('-s', '--initial-batch-size', type=int, default=0, metavar='
                     help='initial input batch size for training (default: 0)')
 parser.add_argument('--epochs', type=int, default=200, metavar='N',
                     help='number of epochs to train (default: 2)')
+parser.add_argument('--start-epoch', default=None, type=int, metavar='N',
+                    help='manual epoch number (useful on restarts)')
 parser.add_argument('--decay-epochs', type=int, default=15, metavar='N',
                     help='epoch interval to decay LR')
 parser.add_argument('--ft-epochs', type=float, default=0., metavar='LR',
@@ -212,34 +214,34 @@ def main():
     loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights).cuda()
 
     # optionally resume from a checkpoint
-    start_epoch = 1
+    start_epoch = args.start_epoch or 0
+    sparse_checkpoint = False
     if args.resume:
         if os.path.isfile(args.resume):
             print("=> loading checkpoint '{}'".format(args.resume))
             checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            sparse_checkpoint = True if 'sparse' in checkpoint and checkpoint['sparse'] else False
-            if sparse_checkpoint:
-                print("Loading sparse model")
-                dense_sparse_dense.sparsify(model, sparsity=0.)  # ensure sparsity_masks exist in model definition
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                if 'sparse' in checkpoint and checkpoint['sparse']:
+                    sparse_checkpoint = True
+                    print("Loading sparse model")
+                    # ensure sparsity_masks exist in model definition before loading state
+                    dense_sparse_dense.sparsify(model, sparsity=0.)
 
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
-            start_epoch = checkpoint['epoch']
-
-            if args.sparse and not sparse_checkpoint:
-                print("Sparsifying loaded model")
-                dense_sparse_dense.sparsify(model, sparsity=0.5)
-            elif sparse_checkpoint and not args.sparse:
-                print("Densifying loaded model")
-                dense_sparse_dense.densify(model)
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
+                start_epoch = args.start_epoch or checkpoint['epoch']
+            else:
+                model.load_state_dict(checkpoint)
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
             exit(-1)
-    else:
-        if args.sparse:
-            dense_sparse_dense.sparsify(model, sparsity=0.5)
+    if not sparse_checkpoint and args.sparse:
+        print("Sparsifying loaded model")
+        dense_sparse_dense.sparsify(model, sparsity=0.5)
+    elif sparse_checkpoint and not args.sparse:
+        print("Densifying loaded model")
+        dense_sparse_dense.densify(model)
 
     use_tensorboard = not args.no_tb and CrayonClient is not None
     if use_tensorboard:
@@ -290,7 +292,7 @@ def main():
 
     best_loss = None
     try:
-        for epoch in range(start_epoch, num_epochs + 1):
+        for epoch in range(start_epoch, num_epochs):
             if args.decay_epochs:
                 adjust_learning_rate(optimizer, epoch, initial_lr=args.lr, decay_epochs=args.decay_epochs)
 
