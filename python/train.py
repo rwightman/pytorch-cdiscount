@@ -285,8 +285,6 @@ def main():
             train_epoch(
                 fepoch, model, loader_train, finetune_optimizer, loss_fn, args,
                 output_dir=output_dir, batch_limit=batch_limit)
-            step = fepoch * len(loader_train)
-            validate(step, model, loader_eval, loss_fn, args, output_dir)
 
     best_loss = None
     try:
