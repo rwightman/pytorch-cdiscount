@@ -1223,7 +1223,7 @@ class ResNet200(nn.Module):
         self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
 
     def forward_features(self, x, pool=True):
-        x = self.features(input)
+        x = self.features(x)
         if pool:
             x = adaptive_avgmax_pool2d(x, self.global_pool)
             x = x.view(x.size(0), -1)
