@@ -8,7 +8,7 @@ import numpy as np
 from collections import OrderedDict
 from datetime import datetime
 
-from dataset import CDiscountDataset
+from dataset import CDiscountDataset, dataset_scan
 from models import model_factory, dense_sparse_dense
 from lr_scheduler import ReduceLROnPlateau
 from utils import AverageMeter, get_outdir
@@ -144,13 +144,14 @@ def main():
     else:
         model.cuda()
 
+    bootstrap = dataset_scan(train_input_root)
+
     dataset_train = CDiscountDataset(
-        train_input_root,
+        bootstrap=bootstrap[0],
         train=True,
         img_size=img_size,
         fold=args.fold,
-        normalize=normalize
-    )
+        normalize=normalize)
 
     #sampler = WeightedRandomOverSampler(dataset_train.get_sample_weights
     if args.initial_batch_size:
@@ -167,7 +168,7 @@ def main():
     )
 
     dataset_eval = CDiscountDataset(
-        train_input_root,
+        bootstrap=bootstrap[1],
         train=False,
         img_size=img_size,
         test_aug=args.tta,
@@ -242,7 +243,6 @@ def main():
     elif sparse_checkpoint and not args.sparse:
         print("Densifying loaded model")
         dense_sparse_dense.densify(model)
-
     use_tensorboard = not args.no_tb and CrayonClient is not None
     if use_tensorboard:
         hostname = '127.0.0.1'

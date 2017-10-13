@@ -270,6 +270,7 @@ class DPN(nn.Module):
 
     def reset_classifier(self, num_classes):
         self.num_classes = num_classes
+        del self.classifier
         if num_classes:
             self.classifier = nn.Conv2d(self.num_features, num_classes, kernel_size=1, bias=True)
         else:

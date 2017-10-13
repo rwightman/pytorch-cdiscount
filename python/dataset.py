@@ -61,10 +61,57 @@ def get_test_aug(factor):
             [False, False, False]]
 
 
+def dataset_scan(
+        input_root,
+        metadata_file='prod_metadata.csv',
+        category_file='category_map.csv',
+        fold=0,
+        sets=('train', 'eval')):
+
+    inputs = find_inputs(input_root, types=['.jpg'])
+    if len(inputs) == 0:
+        raise (RuntimeError("Found 0 images in : " + input_root))
+    inputs_set = {prod_id for prod_id, _, _ in inputs}
+    print(len(inputs_set))
+
+    category_df = pd.read_csv(os.path.join(input_root, category_file))
+    category_to_label1 = dict(zip(category_df.category_id, category_df.level1_label))
+    category_to_label2 = dict(zip(category_df.category_id, category_df.level2_label))
+    category_to_label3 = dict(zip(category_df.category_id, category_df.category_label))
+
+    def _setup_dataset(_df):
+        _df.set_index(['prod_id'], inplace=True)
+        _df = _df[_df.index.isin(inputs_set)]
+        print(len(_df.index))
+        filter_inputs = [t for t in inputs if t[0] in _df.index]
+        print(len(filter_inputs))
+        filtered_targets = dict(zip(_df.index, _df.category_id))
+        print(len(filtered_targets))
+        return filter_inputs, filtered_targets
+
+    target_df = pd.read_csv(os.path.join(input_root, metadata_file))
+    output = []
+    for s in sets:
+        bootstrap = {}
+        if s == 'train':
+            target_df = target_df[target_df['cv'] != fold]
+        else:
+            target_df = target_df[target_df['cv'] == fold]
+        inputs, targets = _setup_dataset(target_df)
+        bootstrap['inputs'] = inputs
+        bootstrap['targets'] = targets
+        bootstrap['category_to_label1'] = category_to_label1
+        bootstrap['category_to_label2'] = category_to_label2
+        bootstrap['category_to_label3'] = category_to_label3
+        output.append(bootstrap)
+
+    return output[0] if len(output) == 1 else output
+
+
 class CDiscountDataset(data.Dataset):
     def __init__(
             self,
-            input_root,
+            input_root='',
             metadata_file='prod_metadata.csv',
             category_file='category_map.csv',
             train=False,
@@ -72,38 +119,21 @@ class CDiscountDataset(data.Dataset):
             img_size=(180, 180),
             normalize='torchvision',
             test_aug=0,
-            transform=None):
+            transform=None,
+            bootstrap=None):
 
-        inputs = find_inputs(input_root, types=['.jpg'])
-        if len(inputs) == 0:
-            raise (RuntimeError("Found 0 images in : " + input_root))
-        inputs_set = {prod_id for prod_id, _, _ in inputs}
-        print(len(inputs_set))
+        if bootstrap is None:
+            assert os.path.exists(input_root)
+            sets = ('train',) if train else ('eval',)
+            bootstrap = dataset_scan(input_root, metadata_file, category_file, fold, sets=sets)
 
-        category_df = pd.read_csv(os.path.join(input_root, category_file))
-        self.category_to_label1 = dict(zip(category_df.category_id, category_df.level1_label))
-        self.category_to_label2 = dict(zip(category_df.category_id, category_df.level2_label))
-        self.category_to_label3 = dict(zip(category_df.category_id, category_df.category_label))
-
-        if metadata_file:
-            target_df = pd.read_csv(os.path.join(input_root, metadata_file))
-            if train:
-                target_df = target_df[target_df['cv'] != fold]
-            else:
-                target_df = target_df[target_df['cv'] == fold]
-
-            target_df.set_index(['prod_id'], inplace=True)
-            target_df = target_df[target_df.index.isin(inputs_set)]
-            print(len(target_df.index))
-
-            self.inputs = [t for t in inputs if t[0] in target_df.index]
-            print(len(self.inputs))
-
-            self.targets = dict(zip(target_df.index, target_df.category_id))
-            print(len(self.targets))
+        self.category_to_label1 = bootstrap['category_to_label1']
+        self.category_to_label2 = bootstrap['category_to_label2']
+        self.category_to_label3 = bootstrap['category_to_label3']
+        self.inputs = bootstrap['inputs']
+        if 'targets' in bootstrap:
+            self.targets = bootstrap['targets']
         else:
-            assert not train
-            self.inputs = sorted(inputs, key=lambda x: natural_key(x[0]))
             self.targets = None
 
         self.train = train

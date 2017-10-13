@@ -1220,6 +1220,7 @@ class ResNet200(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.global_pool = global_pool
         self.num_classes = num_classes
+        del self.fc
         self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
 
     def forward_features(self, x, pool=True):

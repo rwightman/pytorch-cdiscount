@@ -275,6 +275,7 @@ class InceptionResnetV2(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.global_pool = global_pool
         self.num_classes = num_classes
+        del self.classif
         if num_classes:
             self.classif = torch.nn.Linear(1536 * pooling_factor(global_pool), num_classes)
         else:
