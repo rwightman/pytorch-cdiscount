@@ -157,6 +157,7 @@ class ResNet(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.global_pool = AdaptiveAvgMaxPool2d(pool_type=global_pool)
         self.num_classes = num_classes
+        del self.fc
         if num_classes:
             self.fc = nn.Linear(512 * self.expansion * self.global_pool.factor(), num_classes)
         else:

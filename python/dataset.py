@@ -80,8 +80,6 @@ def dataset_scan(
     category_to_label3 = dict(zip(category_df.category_id, category_df.category_label))
 
     def _setup_dataset(_df):
-        _df.set_index(['prod_id'], inplace=True)
-        _df = _df[_df.index.isin(inputs_set)]
         print(len(_df.index))
         filter_inputs = [t for t in inputs if t[0] in _df.index]
         print(len(filter_inputs))
@@ -90,16 +88,18 @@ def dataset_scan(
         return filter_inputs, filtered_targets
 
     target_df = pd.read_csv(os.path.join(input_root, metadata_file))
+    target_df.set_index(['prod_id'], inplace=True)
+    target_df = target_df[target_df.index.isin(inputs_set)]
     output = []
     for s in sets:
         bootstrap = {}
         if s == 'train':
-            target_df = target_df[target_df['cv'] != fold]
+            target_df_working = target_df[target_df['cv'] != fold]
         else:
-            target_df = target_df[target_df['cv'] == fold]
-        inputs, targets = _setup_dataset(target_df)
-        bootstrap['inputs'] = inputs
-        bootstrap['targets'] = targets
+            target_df_working = target_df[target_df['cv'] == fold]
+        processed_inputs, processed_targets = _setup_dataset(target_df_working)
+        bootstrap['inputs'] = processed_inputs
+        bootstrap['targets'] = processed_targets
         bootstrap['category_to_label1'] = category_to_label1
         bootstrap['category_to_label2'] = category_to_label2
         bootstrap['category_to_label3'] = category_to_label3
@@ -146,8 +146,8 @@ class CDiscountDataset(data.Dataset):
 
         if transform is None:
             tfs = [transforms.ToTensor()]
-            if self.train:
-                tfs.append(mytransforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
+            #if self.train:
+            #    tfs.append(mytransforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
             if normalize == 'le':
                 tfs.append(mytransforms.LeNormalize())
             else:
@@ -166,8 +166,8 @@ class CDiscountDataset(data.Dataset):
         angle = 0.
         hflip = random.random() < 0.5
         vflip = False  # random.random() < 0.5
-        trans = random.random() < 0.25
-        do_rotate = (rot > 0 and random.random() < 0.25) if not hflip and not vflip else False
+        trans = False  # random.random() < 0.25
+        do_rotate = (rot > 0 and random.random() < 0.25)
         h, w = input_img.shape[:2]
 
         # Favour rotation/scale choices that involve cropping within image bounds
@@ -279,7 +279,7 @@ class CDiscountDataset(data.Dataset):
         if self.train:
             mid = float(self.img_size[0]) / w
             scale = (mid - .025, mid + .025)
-            input_img = self._random_crop_and_transform(input_img, scale_range=scale, rot=5.0)
+            input_img = self._random_crop_and_transform(input_img, scale_range=scale, rot=10.0)
             input_tensor = self.transform(input_img)
         else:
             scale = float(self.img_size[0]) / w

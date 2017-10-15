@@ -166,8 +166,12 @@ class DenseNet(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.global_pool = global_pool
         self.num_classes = num_classes
-        self.classifier = torch.nn.Linear(
-            self.num_features * pooling_factor(global_pool), num_classes)
+        del self.classifier
+        if num_classes:
+            self.classifier = torch.nn.Linear(
+                self.num_features * pooling_factor(global_pool), num_classes)
+        else:
+            self.classifier = None
 
     def forward_features(self, x, pool=True):
         features = self.features(x)
