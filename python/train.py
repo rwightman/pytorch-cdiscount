@@ -86,6 +86,8 @@ parser.add_argument('--tbh', default='127.0.0.1:8009', type=str, metavar='IP',
                     help='Tensorboard (Crayon) host')
 parser.add_argument('--num-gpu', type=int, default=1,
                     help='Number of GPUS to use')
+parser.add_argument('--initial_checkpoint', default='', type=str, metavar='PATH',
+                    help='path to init checkpoint (default: none)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
 parser.add_argument('--print-freq', '-p', default=10, type=int,
@@ -130,12 +132,16 @@ def main():
         num_classes_init = 1000
         normalize = 'torchvision'
 
+    if '5k' in args.initial_checkpoint:
+        num_classes_init = 4786
+
     model = model_factory.create_model(
         args.model,
         pretrained=args.pretrained,
         num_classes=num_classes_init,
         drop_rate=args.drop,
-        global_pool=args.gp)
+        global_pool=args.gp,
+        checkpoint_path=args.initial_checkpoint)
 
     model.reset_classifier(num_classes=num_classes)
 
