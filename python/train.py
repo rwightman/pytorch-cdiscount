@@ -284,7 +284,7 @@ def main():
     else:
         exp = None
 
-    saver = CheckpointSaver()
+    saver = CheckpointSaver(checkpoint_dir=output_dir)
 
     # Optional fine-tune of only the final classifier weights for specified number of epochs (or part of)
     if not args.resume and args.ft_epochs > 0.:
