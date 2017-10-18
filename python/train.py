@@ -234,7 +234,7 @@ def main():
         train_loss_fn = multi_target.MultiTargetLoss(loss_fn=train_loss_fn)
 
     # optionally resume from a checkpoint
-    start_epoch = args.start_epoch or 0
+    start_epoch = 0 if args.start_epoch is None else args.start_epoch
     sparse_checkpoint = False
     if args.resume:
         if os.path.isfile(args.resume):
@@ -250,7 +250,7 @@ def main():
                 model.load_state_dict(checkpoint['state_dict'])
                 optimizer.load_state_dict(checkpoint['optimizer'])
                 print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
-                start_epoch = args.start_epoch or checkpoint['epoch']
+                start_epoch = checkpoint['epoch'] if args.start_epoch is None else args.start_epoch
             else:
                 model.load_state_dict(checkpoint)
         else:
