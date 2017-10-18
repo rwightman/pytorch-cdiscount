@@ -9,7 +9,7 @@ from collections import OrderedDict
 from datetime import datetime
 
 from dataset import CDiscountDataset, dataset_scan
-from models import model_factory, dense_sparse_dense
+from models import model_factory, dense_sparse_dense, multi_target
 from lr_scheduler import ReduceLROnPlateau
 from utils import AverageMeter, get_outdir
 
@@ -48,6 +48,8 @@ parser.add_argument('--pretrained', action='store_true', default=False,
                     help='Start with pretrained version of specified network (if avail)')
 parser.add_argument('--img-size', type=int, default=224, metavar='N',
                     help='Image patch size (default: 224)')
+parser.add_argument('--mt', '--multi-target', type=int, default=0, metavar='N',
+                    help='multi-target classifier count (default: 0)')
 parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
 parser.add_argument('-s', '--initial-batch-size', type=int, default=0, metavar='N',
@@ -120,7 +122,7 @@ def main():
     batch_size = args.batch_size
     num_epochs = args.epochs
     img_size = (args.img_size, args.img_size)
-    num_classes = 5270 # FIXME
+    num_classes = 5270  # FIXME
 
     torch.manual_seed(args.seed)
 
@@ -143,7 +145,15 @@ def main():
         global_pool=args.gp,
         checkpoint_path=args.initial_checkpoint)
 
-    model.reset_classifier(num_classes=num_classes)
+    if args.multi_target:
+        if args.multi_target == 2:
+            model = multi_target.MultiTargetModel(model, [5270, 483])
+        elif args.multi_target == 3:
+            model = multi_target.MultiTargetModel(model, [5270, 483, 49])
+        else:
+            assert False, 'Invalid target count'
+    else:
+        model.reset_classifier(num_classes=num_classes)
 
     if args.num_gpu > 1:
         model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu))).cuda()
@@ -157,7 +167,8 @@ def main():
         train=True,
         img_size=img_size,
         fold=args.fold,
-        normalize=normalize)
+        normalize=normalize,
+        multi_target=args.multi_target)
 
     #sampler = WeightedRandomOverSampler(dataset_train.get_sample_weights
     if args.initial_batch_size:
@@ -218,7 +229,9 @@ def main():
         class_weights = None
         class_weights_norm = None
 
-    loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights).cuda()
+    train_loss_fn = validate_loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights).cuda()
+    if isinstance(model, multi_target.MultiTargetModel):
+        train_loss_fn = multi_target.MultiTargetLoss(loss_fn=train_loss_fn)
 
     # optionally resume from a checkpoint
     start_epoch = args.start_epoch or 0
@@ -317,7 +330,7 @@ def main():
                         num_workers=args.workers)
 
             train_metrics = train_epoch(
-                epoch, model, loader_train, optimizer, loss_fn, args,
+                epoch, model, loader_train, optimizer, train_loss_fn, args,
                 saver=saver, output_dir=output_dir, exp=exp)
 
             # save a recovery in case validation blows up
@@ -335,7 +348,7 @@ def main():
 
             step = epoch * len(loader_train)
             eval_metrics = validate(
-                step, model, loader_eval, loss_fn, args,
+                step, model, loader_eval, validate_loss_fn, args,
                 output_dir=output_dir, exp=exp)
 
             if lr_scheduler is not None:
@@ -383,9 +396,12 @@ def train_epoch(
     for batch_idx, (input, target, index) in enumerate(loader):
         step = epoch_step + batch_idx
         data_time_m.update(time.time() - end)
-        input, target = input.cuda(), target.cuda()
-        input_var = autograd.Variable(input)
-        target_var = autograd.Variable(target)
+
+        input_var = autograd.Variable(input.cuda())
+        if isinstance(target, list):
+            target_var = [autograd.Variable(t.cuda()) for t in target]
+        else:
+            target_var = autograd.Variable(target.cuda())
 
         output = model(input_var)
 
@@ -457,11 +473,15 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
 
     end = time.time()
     for i, (input, target, _) in enumerate(loader):
-        input, target = input.cuda(), target.cuda()
-        input_var = autograd.Variable(input, volatile=True)
-        target_var = autograd.Variable(target, volatile=True)
+        input_var = autograd.Variable(input.cuda(), volatile=True)
+        if isinstance(target, list):
+            target = target[0]
+        target_var = autograd.Variable(target.cuda(), volatile=True)
 
         output = model(input_var)
+
+        if isinstance(output, list):
+            output = output[0]
 
         # augmentation reduction
         reduce_factor = loader.dataset.get_aug_factor()
@@ -474,7 +494,7 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
         losses_m.update(loss.data[0], input.size(0))
 
         # metrics
-        prec1, prec5 = accuracy(output.data, target, topk=(1, 3))
+        prec1, prec5 = accuracy(output.data, target_var.data, topk=(1, 3))
         prec1_m.update(prec1[0], output.size(0))
         prec5_m.update(prec5[0], output.size(0))
 
@@ -558,7 +578,7 @@ class CheckpointSaver:
 
     def save_checkpoint(self, state, epoch, metric=None):
         worst_metric = self.checkpoint_files[-1] if self.checkpoint_files else None
-        if len(self.checkpoint_files) < self.checkpoint_history or metric < worst_metric:
+        if len(self.checkpoint_files) < self.checkpoint_history or metric < worst_metric[1]:
             if len(self.checkpoint_files) >= self.checkpoint_history:
                 self._cleanup_checkpoints(1)
 

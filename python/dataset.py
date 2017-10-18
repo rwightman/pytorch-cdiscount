@@ -120,7 +120,8 @@ class CDiscountDataset(data.Dataset):
             normalize='torchvision',
             test_aug=0,
             transform=None,
-            bootstrap=None):
+            bootstrap=None,
+            multi_target=0):
 
         if bootstrap is None:
             assert os.path.exists(input_root)
@@ -138,6 +139,8 @@ class CDiscountDataset(data.Dataset):
 
         self.train = train
         self.img_size = img_size
+        self.crop_factor = 0.875
+        self.multi_target = multi_target
 
         if not train:
             self.test_aug = get_test_aug(test_aug)
@@ -184,7 +187,6 @@ class CDiscountDataset(data.Dataset):
         if crop_w > w or crop_h > h:
             # We can still handle crops larger than the source, add a border
             angle = 0.0
-            #scale = 1.0
             border_w = crop_w - w
             border_h = crop_h - h
             input_img = cv2.copyMakeBorder(
@@ -192,6 +194,7 @@ class CDiscountDataset(data.Dataset):
                 border_h//2, border_h - border_h//2,
                 border_w//2, border_w - border_w//2,
                 cv2.BORDER_REFLECT_101)
+            #print('cropl', crop_w, crop_h, border_w, border_h)
             input_img = np.ascontiguousarray(input_img)  # trying to hunt a pytorch/cuda crash, is was this necessary?
             assert input_img.shape[:2] == (crop_h, crop_w)
         else:
@@ -201,6 +204,7 @@ class CDiscountDataset(data.Dataset):
             wo = random.randint(0, wd) - math.ceil(wd / 2)
             cx = w // 2 + wo
             cy = h // 2 + ho
+            #print('crops', crop_w, crop_h, cx, cy)
             input_img = utils.crop_center(input_img, cx, cy, crop_w, crop_h)
 
         #print('hflip: %d, vflip: %d, angle: %f, scale: %f' % (hflip, vflip, angle, scale))
@@ -225,7 +229,8 @@ class CDiscountDataset(data.Dataset):
             else:
                 m_final = m_translate
 
-            input_img = cv2.warpAffine(input_img, m_final[:2, :], self.img_size, borderMode=cv2.BORDER_REFLECT_101)
+            input_img = cv2.warpAffine(
+                input_img, m_final[:2, :], self.img_size, flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
         else:
             if trans:
                 input_img = cv2.transpose(input_img)
@@ -236,7 +241,7 @@ class CDiscountDataset(data.Dataset):
                     c = 0 if vflip else 1
                 input_img = cv2.flip(input_img, flipCode=c)
 
-            input_img = cv2.resize(input_img, self.img_size,  interpolation=cv2.INTER_LINEAR)
+            input_img = cv2.resize(input_img, self.img_size,  interpolation=cv2.INTER_CUBIC)
 
         return input_img
 
@@ -271,18 +276,31 @@ class CDiscountDataset(data.Dataset):
         if self.targets is not None:
             category_id = self.targets[prod_id]
             target_label = self.category_to_label3[category_id]
-            target_tensor = target_label.item()
+            if self.train and self.multi_target > 1:
+                target_label2 = self.category_to_label2[category_id]
+                if self.multi_target == 3:
+                    target_label1 = self.category_to_label1[category_id]
+                    target_tensor = [target_label.item(), target_label2.item(), target_label1.item()]
+                else:
+                    target_tensor = [target_label.item(), target_label2.item()]
+            else:
+                target_tensor = target_label.item()
         else:
+            assert not self.train
             target_tensor = torch.zeros(1)
 
         h, w = input_img.shape[:2]
         if self.train:
             mid = float(self.img_size[0]) / w
-            scale = (mid - .025, mid + .025)
-            input_img = self._random_crop_and_transform(input_img, scale_range=scale, rot=10.0)
+            if self.crop_factor:
+                mid /= self.crop_factor
+            scale_range = (mid - .03, mid + .03)
+            input_img = self._random_crop_and_transform(input_img, scale_range=scale_range, rot=10.0)
             input_tensor = self.transform(input_img)
         else:
             scale = float(self.img_size[0]) / w
+            if self.crop_factor:
+                scale /= self.crop_factor
             trans, vflip, hflip = False, False, False
             if len(self.test_aug) > 1:
                 trans, vflip, hflip = self.test_aug[aug_index]
