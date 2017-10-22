@@ -150,7 +150,7 @@ class CDiscountDataset(data.Dataset):
         if transform is None:
             tfs = [transforms.ToTensor()]
             #if self.train:
-            #    tfs.append(mytransforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2))
+            #    tfs.append(mytransforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05))
             if normalize == 'le':
                 tfs.append(mytransforms.LeNormalize())
             else:

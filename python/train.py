@@ -212,7 +212,8 @@ def main():
             model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     elif args.opt.lower() == 'rmsprop':
         optimizer = optim.RMSprop(
-            model.parameters(), lr=args.lr, alpha=0.9, momentum=args.momentum, weight_decay=args.weight_decay)
+            model.parameters(), lr=args.lr, alpha=0.9, eps=1.0,
+            momentum=args.momentum, weight_decay=args.weight_decay)
     else:
         assert False and "Invalid optimizer"
 
@@ -364,7 +365,7 @@ def main():
                 dw.writerow(rowd)
 
             # save proper checkpoint with eval metric
-            saver.save_checkpoint({
+            best_loss = saver.save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.model,
                 'sparse': args.sparse,
@@ -593,6 +594,7 @@ class CheckpointSaver:
             if metric is not None and (self.best_metric is None or metric < self.best_metric[1]):
                 self.best_metric = (epoch, metric)
                 shutil.copyfile(save_path, os.path.join(self.checkpoint_dir, 'model_best' + self.extension))
+        return None if self.best_metric is None else self.best_metric[1]
 
     def _cleanup_checkpoints(self, trim=0):
         trim = max(len(self.checkpoint_files), trim)
