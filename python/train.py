@@ -48,7 +48,7 @@ parser.add_argument('--pretrained', action='store_true', default=False,
                     help='Start with pretrained version of specified network (if avail)')
 parser.add_argument('--img-size', type=int, default=224, metavar='N',
                     help='Image patch size (default: 224)')
-parser.add_argument('--mt', '--multi-target', type=int, default=0, metavar='N',
+parser.add_argument('--multi-target', '--mt', type=int, default=0, metavar='N',
                     help='multi-target classifier count (default: 0)')
 parser.add_argument('-b', '--batch-size', type=int, default=32, metavar='N',
                     help='input batch size for training (default: 32)')
