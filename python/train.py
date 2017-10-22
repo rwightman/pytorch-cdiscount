@@ -88,7 +88,7 @@ parser.add_argument('--tbh', default='127.0.0.1:8009', type=str, metavar='IP',
                     help='Tensorboard (Crayon) host')
 parser.add_argument('--num-gpu', type=int, default=1,
                     help='Number of GPUS to use')
-parser.add_argument('--initial_checkpoint', default='', type=str, metavar='PATH',
+parser.add_argument('--initial-checkpoint', default='', type=str, metavar='PATH',
                     help='path to init checkpoint (default: none)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -232,7 +232,11 @@ def main():
 
     train_loss_fn = validate_loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights).cuda()
     if isinstance(model, multi_target.MultiTargetModel):
-        train_loss_fn = multi_target.MultiTargetLoss(loss_fn=train_loss_fn)
+        if args.multi_target == 3:
+            mt_scales = [1.0, 0.3, 0.2]
+        else:
+            mt_scales = [1.0, 0.1]
+        train_loss_fn = multi_target.MultiTargetLoss(scales=mt_scales, loss_fn=train_loss_fn)
 
     # optionally resume from a checkpoint
     start_epoch = 0 if args.start_epoch is None else args.start_epoch
