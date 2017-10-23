@@ -60,6 +60,8 @@ parser.add_argument('--start-epoch', default=None, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--decay-epochs', type=int, default=15, metavar='N',
                     help='epoch interval to decay LR')
+parser.add_argument('--decay-rate', '--dr', type=float, default=0.1, metavar='RATE',
+                    help='LR decay rate (default: 0.1)')
 parser.add_argument('--ft-epochs', type=float, default=0., metavar='LR',
                     help='Number of finetuning epochs (final layer only)')
 parser.add_argument('--ft-opt', default='sgd', type=str, metavar='OPTIMIZER',
@@ -311,14 +313,16 @@ def main():
             else:
                 batch_limit = 0
             train_epoch(
-                fepoch, model, loader_train, finetune_optimizer, loss_fn, args,
+                fepoch, model, loader_train, finetune_optimizer, train_loss_fn, args,
                 output_dir=output_dir, batch_limit=batch_limit)
 
     best_loss = None
     try:
         for epoch in range(start_epoch, num_epochs):
             if args.decay_epochs:
-                adjust_learning_rate(optimizer, epoch, initial_lr=args.lr, decay_epochs=args.decay_epochs)
+                adjust_learning_rate(
+                    optimizer, epoch, initial_lr=args.lr,
+                    decay_rate=args.decay_rate, decay_epochs=args.decay_epochs)
 
             if args.initial_batch_size:
                 next_batch_size = adjust_batch_size(
@@ -531,9 +535,10 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
     return metrics
 
 
-def adjust_learning_rate(optimizer, epoch, initial_lr, decay_epochs=30):
+def adjust_learning_rate(optimizer, epoch, initial_lr, decay_rate=0.1, decay_epochs=30):
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = initial_lr * (0.1 ** (epoch // decay_epochs))
+    lr = initial_lr * (decay_rate ** (epoch // decay_epochs))
+    print('Setting LR to', lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
