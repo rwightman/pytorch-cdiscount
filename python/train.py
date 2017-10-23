@@ -12,6 +12,7 @@ from dataset import CDiscountDataset, dataset_scan
 from models import model_factory, dense_sparse_dense, multi_target
 from lr_scheduler import ReduceLROnPlateau
 from utils import AverageMeter, get_outdir
+from optim import nadam
 
 import torch
 import torch.autograd as autograd
@@ -34,6 +35,8 @@ parser.add_argument('--model', default='resnet101', type=str, metavar='MODEL',
                     help='Name of model to train (default: "countception"')
 parser.add_argument('--opt', default='sgd', type=str, metavar='OPTIMIZER',
                     help='Optimizer (default: "sgd"')
+parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
+                    help='Optimizer Epsilon (default: 1e-8)')
 parser.add_argument('--loss', default='mlsm', type=str, metavar='LOSS',
                     help='Loss function (default: "nll"')
 parser.add_argument('--gp', default='avg', type=str, metavar='POOL',
@@ -205,16 +208,20 @@ def main():
 
     if args.opt.lower() == 'sgd':
         optimizer = optim.SGD(
-            model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay)
+            model.parameters(), lr=args.lr,
+            momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
     elif args.opt.lower() == 'adam':
         optimizer = optim.Adam(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
+    elif args.opt.lower() == 'nadam':
+        optimizer = nadam.Nadam(
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
     elif args.opt.lower() == 'adadelta':
         optimizer = optim.Adadelta(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
     elif args.opt.lower() == 'rmsprop':
         optimizer = optim.RMSprop(
-            model.parameters(), lr=args.lr, alpha=0.9, eps=1.0,
+            model.parameters(), lr=args.lr, alpha=0.9, eps=args.opt_eps,
             momentum=args.momentum, weight_decay=args.weight_decay)
     else:
         assert False and "Invalid optimizer"
