@@ -59,29 +59,25 @@ class Nadam(Optimizer):
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
                 beta1, beta2 = group['betas']
                 eps = group['eps']
-
                 state['step'] += 1
+                t = state['step']
 
                 if group['weight_decay'] != 0:
                     grad = grad.add(group['weight_decay'], p.data)
 
                 momentum_cache_t = beta1 * \
-                    (1. - 0.5 * (0.96 ** (state['step'] * schedule_decay)))
+                    (1. - 0.5 * (0.96 ** (t * schedule_decay)))
                 momentum_cache_t_1 = beta1 * \
-                    (1. - 0.5 *
-                     (0.96 ** ((state['step'] + 1) * schedule_decay)))
+                    (1. - 0.5 * (0.96 ** ((t + 1) * schedule_decay)))
                 m_schedule_new = m_schedule * momentum_cache_t
                 m_schedule_next = m_schedule * momentum_cache_t * momentum_cache_t_1
                 state['m_schedule'] = m_schedule_new
 
                 # Decay the first and second moment running average coefficient
-                bias_correction2 = 1 - beta2 ** state['step']
-
-                exp_avg.mul_(beta1).add_(1 - beta1, grad)
-                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                exp_avg_sq_prime = exp_avg_sq.div(1. - bias_correction2)
-
-                denom = exp_avg_sq_prime.sqrt_().add_(group['eps'])
+                exp_avg.mul_(beta1).add_(1. - beta1, grad)
+                exp_avg_sq.mul_(beta2).addcmul_(1. - beta2, grad, grad)
+                exp_avg_sq_prime = exp_avg_sq / (1. - beta2 ** t)
+                denom = exp_avg_sq_prime.sqrt_().add_(eps)
 
                 p.data.addcdiv_(-group['lr'] * (1. - momentum_cache_t) / (1. - m_schedule_new), grad, denom)
                 p.data.addcdiv_(-group['lr'] * momentum_cache_t_1 / (1. - m_schedule_next), exp_avg, denom)
