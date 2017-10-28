@@ -267,7 +267,7 @@ class InceptionResnetV2(nn.Module):
         self.block8 = Block8(noReLU=True)
         self.conv2d_7b = BasicConv2d(2080, 1536, kernel_size=1, stride=1)
         self.num_features = 1536
-        self.classif = nn.Linear(1536 * pooling_factor(global_pool), num_classes)
+        self.classif = nn.Linear(1536, num_classes)
 
     def get_classifier(self):
         return self.classif
@@ -277,7 +277,7 @@ class InceptionResnetV2(nn.Module):
         self.num_classes = num_classes
         del self.classif
         if num_classes:
-            self.classif = torch.nn.Linear(1536 * pooling_factor(global_pool), num_classes)
+            self.classif = torch.nn.Linear(1536, num_classes)
         else:
             self.classif = None
 

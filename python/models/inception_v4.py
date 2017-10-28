@@ -259,7 +259,7 @@ class InceptionV4(nn.Module):
             Inception_C(),
             Inception_C(),
         )
-        self.classif = nn.Linear(1536 * pooling_factor(global_pool), num_classes)
+        self.classif = nn.Linear(1536, num_classes)
 
     def get_classifier(self):
         return self.classif
@@ -267,7 +267,7 @@ class InceptionV4(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.global_pool = global_pool
         self.num_classes = num_classes
-        self.classif = nn.Linear(1536 * pooling_factor(global_pool), num_classes)
+        self.classif = nn.Linear(1536, num_classes)
 
     def forward_features(self, x, pool=True):
         x = self.features(x)

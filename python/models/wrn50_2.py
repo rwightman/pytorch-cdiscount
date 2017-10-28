@@ -350,9 +350,10 @@ class Wrn50_2(nn.Module):
         super(Wrn50_2, self).__init__()
         self.drop_rate = drop_rate
         self.num_classes = num_classes
+        self.num_features = 2048
         self.global_pool = global_pool
         self.features = wrn_50_2_features(activation_fn=activation_fn)
-        self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
+        self.fc = nn.Linear(2048, num_classes)
 
     def get_classifier(self):
         return self.fc
@@ -360,10 +361,10 @@ class Wrn50_2(nn.Module):
     def reset_classifier(self, num_classes, global_pool='avg'):
         self.num_classes = num_classes
         self.global_pool = global_pool
-        self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
+        self.fc = nn.Linear(2048, num_classes)
 
     def forward_features(self, x, pool=True):
-        x = self.features(input)
+        x = self.features(x)
         if pool:
             x = adaptive_avgmax_pool2d(x, self.global_pool)
             x = x.view(x.size(0), -1)

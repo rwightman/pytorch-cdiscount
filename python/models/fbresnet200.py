@@ -1204,8 +1204,9 @@ class ResNet200(nn.Module):
         self.drop_rate = drop_rate
         self.global_pool = global_pool
         self.num_classes = num_classes
+        self.num_features = 2048
         self.features = fbresnet200_features(activation_fn=activation_fn)
-        self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
+        self.fc = nn.Linear(2048, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -1221,7 +1222,7 @@ class ResNet200(nn.Module):
         self.global_pool = global_pool
         self.num_classes = num_classes
         del self.fc
-        self.fc = nn.Linear(2048 * pooling_factor(global_pool), num_classes)
+        self.fc = nn.Linear(2048, num_classes)
 
     def forward_features(self, x, pool=True):
         x = self.features(x)

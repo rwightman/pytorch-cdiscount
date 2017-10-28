@@ -269,7 +269,7 @@ def main():
                 model.load_state_dict(checkpoint)
         else:
             print("=> no checkpoint found at '{}'".format(args.resume))
-            exit(-1)
+            exit(1)
     if not sparse_checkpoint and args.sparse:
         print("Sparsifying loaded model")
         dense_sparse_dense.sparsify(model, sparsity=0.5)

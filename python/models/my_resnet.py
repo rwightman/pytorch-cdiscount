@@ -125,7 +125,7 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, layers[3], stride=2, drop_rate=block_drop_rate)
         self.global_pool = AdaptiveAvgMaxPool2d(pool_type=global_pool)
         self.num_features = 512 * block.expansion
-        self.fc = nn.Linear(self.num_features * self.global_pool.factor(), num_classes)
+        self.fc = nn.Linear(self.num_features, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -159,7 +159,7 @@ class ResNet(nn.Module):
         self.num_classes = num_classes
         del self.fc
         if num_classes:
-            self.fc = nn.Linear(512 * self.expansion * self.global_pool.factor(), num_classes)
+            self.fc = nn.Linear(512 * self.expansion, num_classes)
         else:
             self.fc = None
 

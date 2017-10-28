@@ -14,20 +14,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def pooling_factor(pool_type='avg'):
-    return 2 if pool_type == 'avgmaxc' else 1
-
-
 def adaptive_avgmax_pool2d(x, pool_type='avg', padding=0, count_include_pad=False):
     """Selectable global pooling function with dynamic input kernel size
     """
-    if pool_type == 'avgmaxc':
-        x = torch.cat([
-            F.avg_pool2d(
-                x, kernel_size=(x.size(2), x.size(3)), padding=padding, count_include_pad=count_include_pad),
-            F.max_pool2d(x, kernel_size=(x.size(2), x.size(3)), padding=padding)
-        ], dim=1)
-    elif pool_type == 'avgmax':
+    if pool_type == 'avgmax':
         x_avg = F.avg_pool2d(
                 x, kernel_size=(x.size(2), x.size(3)), padding=padding, count_include_pad=count_include_pad)
         x_max = F.max_pool2d(x, kernel_size=(x.size(2), x.size(3)), padding=padding)
@@ -49,7 +39,7 @@ class AdaptiveAvgMaxPool2d(torch.nn.Module):
         super(AdaptiveAvgMaxPool2d, self).__init__()
         self.output_size = output_size
         self.pool_type = pool_type
-        if pool_type == 'avgmaxc' or pool_type == 'avgmax':
+        if pool_type == 'avgmax':
             self.pool = nn.ModuleList([nn.AdaptiveAvgPool2d(output_size), nn.AdaptiveMaxPool2d(output_size)])
         elif pool_type == 'max':
             self.pool = nn.AdaptiveMaxPool2d(output_size)
@@ -59,16 +49,11 @@ class AdaptiveAvgMaxPool2d(torch.nn.Module):
             self.pool = nn.AdaptiveAvgPool2d(output_size)
 
     def forward(self, x):
-        if self.pool_type == 'avgmaxc':
-            x = torch.cat([p(x) for p in self.pool], dim=1)
-        elif self.pool_type == 'avgmax':
+        if self.pool_type == 'avgmax':
             x = 0.5 * torch.sum(torch.stack([p(x) for p in self.pool]), 0).squeeze(dim=0)
         else:
             x = self.pool(x)
         return x
-
-    def factor(self):
-        return pooling_factor(self.pool_type)
 
     def __repr__(self):
         return self.__class__.__name__ + ' (' \

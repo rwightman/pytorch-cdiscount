@@ -155,8 +155,7 @@ class DenseNet(nn.Module):
         self.features.add_module('norm5', nn.BatchNorm2d(num_features))
 
         # Linear layer
-        self.classifier = torch.nn.Linear(
-            num_features * pooling_factor(global_pool), num_classes)
+        self.classifier = torch.nn.Linear(num_features, num_classes)
 
         self.num_features = num_features
 
@@ -168,8 +167,7 @@ class DenseNet(nn.Module):
         self.num_classes = num_classes
         del self.classifier
         if num_classes:
-            self.classifier = torch.nn.Linear(
-                self.num_features * pooling_factor(global_pool), num_classes)
+            self.classifier = torch.nn.Linear(self.num_features, num_classes)
         else:
             self.classifier = None
 
