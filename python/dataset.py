@@ -139,7 +139,7 @@ class CDiscountDataset(data.Dataset):
 
         self.train = train
         self.img_size = img_size
-        self.crop_factor = 0.875
+        self.crop_factor = 0.95
         self.multi_target = multi_target
 
         if not train:
@@ -294,7 +294,7 @@ class CDiscountDataset(data.Dataset):
             mid = float(self.img_size[0]) / w
             if self.crop_factor:
                 mid /= self.crop_factor
-            scale_range = (mid - .03, mid + .03)
+            scale_range = (mid - .05, mid + .05)
             input_img = self._random_crop_and_transform(input_img, scale_range=scale_range, rot=10.0)
             input_tensor = self.transform(input_img)
         else:

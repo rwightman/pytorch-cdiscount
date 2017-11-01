@@ -76,7 +76,7 @@ parser.add_argument('--drop', type=float, default=0.1, metavar='DROP',
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
 parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
-                    help='SGD momentum (default: 0.5)')
+                    help='SGD momentum (default: 0.9)')
 parser.add_argument('--weight-decay', type=float, default=0.0005, metavar='M',
                     help='weight decay (default: 0.0001)')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
@@ -302,14 +302,18 @@ def main():
 
     # Optional fine-tune of only the final classifier weights for specified number of epochs (or part of)
     if not args.resume and args.ft_epochs > 0.:
+        if isinstance(model, torch.nn.DataParallel):
+            classifier_params = model.module.get_classifier().parameters()
+        else:
+            classifier_params = model.get_classifier().parameters()
         if args.opt.lower() == 'adam':
             finetune_optimizer = optim.Adam(
-                model.get_classifier().parameters(),
+                classifier_params,
                 lr=args.ft_lr, weight_decay=args.weight_decay)
         else:
             finetune_optimizer = optim.SGD(
-                model.get_classifier().parameters(),
-                lr=args.ft_lr, momentum=args.momentum, weight_decay=args.weight_decay)
+                classifier_params,
+                lr=args.ft_lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
 
         finetune_epochs_int = int(np.ceil(args.ft_epochs))
         finetune_final_batches = int(np.ceil((1 - (finetune_epochs_int - args.ft_epochs)) * len(loader_train)))
@@ -620,7 +624,7 @@ class CheckpointSaver:
         for d in to_delete:
             try:
                 print('Cleaning checkpoint', d)
-                os.remove(d[1])
+                os.remove(d[0])
             except Exception as e:
                 print('Exception (%s) while deleting checkpoint' % str(e))
 
