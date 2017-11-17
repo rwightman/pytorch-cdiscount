@@ -176,7 +176,7 @@ class DenseNet(nn.Module):
         out = F.relu(features, inplace=True)
         if pool:
             out = adaptive_avgmax_pool2d(out, self.global_pool)
-            out = out.squeeze()
+            out = x.view(out.size(0), -1)
         return out
 
     def forward(self, x):

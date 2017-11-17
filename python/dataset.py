@@ -200,8 +200,8 @@ class CDiscountDataset(data.Dataset):
         else:
             hd = max(0, h - crop_h)
             wd = max(0, w - crop_w)
-            ho = random.randint(0, hd) - math.ceil(hd / 2)
-            wo = random.randint(0, wd) - math.ceil(wd / 2)
+            ho = np.random.binomial(hd, 0.5) - math.ceil(hd / 2)
+            wo = np.random.binomial(wd, 0.5) - math.ceil(wd / 2)
             cx = w // 2 + wo
             cy = h // 2 + ho
             #print('crops', crop_w, crop_h, cx, cy)
