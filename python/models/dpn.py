@@ -28,8 +28,8 @@ model_urls = {
     'dpn92': '',
     'dpn92_extra': '',
     'dpn98': '',
-    'dpn131': '',
-    'dpn107_extra': ''
+    'dpn131': 'dpn131-89380fa2.pth',
+    'dpn107_extra': 'dpn107_extra-fc014e8ec.pth'
 }
 
 
