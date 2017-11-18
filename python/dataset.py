@@ -74,7 +74,9 @@ def dataset_scan(
     inputs_set = {prod_id for prod_id, _, _ in inputs}
     print(len(inputs_set))
 
-    category_df = pd.read_csv(os.path.join(input_root, category_file))
+    if not os.path.isfile(category_file):
+        category_file = os.path.join(input_root, category_file)
+    category_df = pd.read_csv(category_file)
     category_to_label1 = dict(zip(category_df.category_id, category_df.level1_label))
     category_to_label2 = dict(zip(category_df.category_id, category_df.level2_label))
     category_to_label3 = dict(zip(category_df.category_id, category_df.category_label))
@@ -87,7 +89,9 @@ def dataset_scan(
         print(len(filtered_targets))
         return filter_inputs, filtered_targets
 
-    target_df = pd.read_csv(os.path.join(input_root, metadata_file))
+    if not os.path.isfile(metadata_file):
+        metadata_file = os.path.join(input_root, metadata_file)
+    target_df = pd.read_csv(metadata_file)
     target_df.set_index(['prod_id'], inplace=True)
     target_df = target_df[target_df.index.isin(inputs_set)]
     output = []
