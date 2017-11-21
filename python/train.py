@@ -318,8 +318,8 @@ def main():
         finetune_epochs_int = int(np.ceil(args.ft_epochs))
         finetune_final_batches = int(np.ceil((1 - (finetune_epochs_int - args.ft_epochs)) * len(loader_train)))
         print(finetune_epochs_int, finetune_final_batches)
-        for fepoch in range(1, finetune_epochs_int + 1):
-            if fepoch == finetune_epochs_int and finetune_final_batches:
+        for fepoch in range(0, finetune_epochs_int):
+            if fepoch == finetune_epochs_int - 1 and finetune_final_batches:
                 batch_limit = finetune_final_batches
             else:
                 batch_limit = 0
