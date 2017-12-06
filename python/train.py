@@ -22,12 +22,6 @@ import torch.optim as optim
 import torch.utils.data as data
 import torchvision.utils
 
-try:
-    from pycrayon import CrayonClient
-except ImportError:
-    CrayonClient = None
-
-
 parser = argparse.ArgumentParser(description='Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
@@ -87,10 +81,6 @@ parser.add_argument('--recovery-interval', type=int, default=1000, metavar='N',
                     help='how many batches to wait before writing recovery checkpoint')
 parser.add_argument('-j', '--workers', type=int, default=2, metavar='N',
                     help='how many training processes to use (default: 1)')
-parser.add_argument('--no-tb', action='store_true', default=False,
-                    help='disables tensorboard')
-parser.add_argument('--tbh', default='127.0.0.1:8009', type=str, metavar='IP',
-                    help='Tensorboard (Crayon) host')
 parser.add_argument('--num-gpu', type=int, default=1,
                     help='Number of GPUS to use')
 parser.add_argument('--initial-checkpoint', default='', type=str, metavar='PATH',
@@ -276,27 +266,6 @@ def main():
     elif sparse_checkpoint and not args.sparse:
         print("Densifying loaded model")
         dense_sparse_dense.densify(model)
-    use_tensorboard = not args.no_tb and CrayonClient is not None
-    if use_tensorboard:
-        hostname = '127.0.0.1'
-        port = 8889
-        host_port = args.tbh.split(':')[:2]
-        if len(host_port) == 1:
-            hostname = host_port[0]
-        elif len(host_port) >= 2:
-            hostname, port = host_port[:2]
-        try:
-            cc = CrayonClient(hostname=hostname, port=port)
-            try:
-                cc.remove_experiment(exp_name)
-            except ValueError:
-                pass
-            exp = cc.create_experiment(exp_name)
-        except Exception as e:
-            exp = None
-            print("Error (%s) connecting to Tensoboard/Crayon server. Giving up..." % str(e))
-    else:
-        exp = None
 
     saver = CheckpointSaver(checkpoint_dir=output_dir)
 
@@ -351,7 +320,7 @@ def main():
 
             train_metrics = train_epoch(
                 epoch, model, loader_train, optimizer, train_loss_fn, args,
-                saver=saver, output_dir=output_dir, exp=exp)
+                saver=saver, output_dir=output_dir)
 
             # save a recovery in case validation blows up
             saver.save_recovery({
@@ -369,7 +338,7 @@ def main():
             step = epoch * len(loader_train)
             eval_metrics = validate(
                 step, model, loader_eval, validate_loss_fn, args,
-                output_dir=output_dir, exp=exp)
+                output_dir=output_dir)
 
             if lr_scheduler is not None:
                 lr_scheduler.step(eval_metrics['eval_loss'])
@@ -403,7 +372,7 @@ def main():
 
 def train_epoch(
         epoch, model, loader, optimizer, loss_fn, args,
-        saver=None, output_dir='', exp=None, batch_limit=0):
+        saver=None, output_dir='', batch_limit=0):
 
     epoch_step = (epoch - 1) * len(loader)
     batch_time_m = AverageMeter()
@@ -451,10 +420,6 @@ def train_epoch(
                 rate_avg=input_var.size(0) / batch_time_m.avg,
                 data_time=data_time_m))
 
-            if exp is not None:
-                exp.add_scalar_value('loss_train', losses_m.val, step=step)
-                exp.add_scalar_value('learning_rate', optimizer.param_groups[0]['lr'], step=step)
-
             if args.save_batches:
                 torchvision.utils.save_image(
                     input,
@@ -483,7 +448,7 @@ def train_epoch(
     return OrderedDict([('train_loss', losses_m.avg)])
 
 
-def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
+def validate(step, model, loader, loss_fn, args, output_dir=''):
     batch_time_m = AverageMeter()
     losses_m = AverageMeter()
     prec1_m = AverageMeter()
@@ -539,10 +504,6 @@ def validate(step, model, loader, loss_fn, args, output_dir='', exp=None):
 
     metrics = OrderedDict([('eval_loss', losses_m.avg), ('eval_prec1', prec1_m.avg)])
 
-    if exp is not None:
-        exp.add_scalar_value('loss_eval', losses_m.avg, step=step)
-        exp.add_scalar_value('prec@1_eval', prec1_m.avg, step=step)
-
     return metrics
 
 
@@ -582,13 +543,13 @@ class CheckpointSaver:
             recovery_prefix='recovery',
             checkpoint_dir='',
             recovery_dir='',
-            checkpoint_history=10):
+            max_history=10):
 
         self.checkpoint_files = []
         self.best_metric = None
         self.worst_metric = None
-        self.checkpoint_history = checkpoint_history
-        assert self.checkpoint_history >= 1
+        self.max_history = max_history
+        assert self.max_history >= 1
         self.curr_recovery_file = ''
         self.last_recovery_file = ''
         self.checkpoint_dir = checkpoint_dir
@@ -599,8 +560,8 @@ class CheckpointSaver:
 
     def save_checkpoint(self, state, epoch, metric=None):
         worst_metric = self.checkpoint_files[-1] if self.checkpoint_files else None
-        if len(self.checkpoint_files) < self.checkpoint_history or metric < worst_metric[1]:
-            if len(self.checkpoint_files) >= self.checkpoint_history:
+        if len(self.checkpoint_files) < self.max_history or metric < worst_metric[1]:
+            if len(self.checkpoint_files) >= self.max_history:
                 self._cleanup_checkpoints(1)
 
             filename = '-'.join([self.save_prefix, str(epoch)]) + self.extension
@@ -617,16 +578,19 @@ class CheckpointSaver:
         return None if self.best_metric is None else self.best_metric[1]
 
     def _cleanup_checkpoints(self, trim=0):
-        trim = max(len(self.checkpoint_files), trim)
-        if len(self.checkpoint_files) <= self.checkpoint_history - trim:
+        trim = min(len(self.checkpoint_files), trim)
+        delete_index = self.max_history - trim
+        if delete_index <= 0 or len(self.checkpoint_files) <= delete_index:
             return
-        to_delete = self.checkpoint_files[self.checkpoint_history - trim:]
+        to_delete = self.checkpoint_files[delete_index:]
+        print(self.checkpoint_files, to_delete)
         for d in to_delete:
             try:
                 print('Cleaning checkpoint', d)
                 os.remove(d[0])
             except Exception as e:
                 print('Exception (%s) while deleting checkpoint' % str(e))
+        self.checkpoint_files = self.checkpoint_files[:delete_index]
 
     def save_recovery(self, state, epoch, batch_idx):
         filename = '-'.join([self.recovery_prefix, str(epoch), str(batch_idx)]) + self.extension

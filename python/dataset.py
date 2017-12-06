@@ -62,12 +62,21 @@ def get_test_aug(factor):
 
 
 def dataset_scan(
-        input_root,
+        dataset_root,
         metadata_file='prod_metadata.csv',
         category_file='category_map.csv',
         fold=0,
-        sets=('train', 'eval')):
+        splits=('train', 'eval')):
 
+    if 'test' in splits:
+        split_base = 'test'
+        assert len(splits) == 1
+        has_labels = False
+    else:
+        split_base = 'train'  # train and eval share same base
+        has_labels = True
+
+    input_root = os.path.join(dataset_root, split_base)
     inputs = find_inputs(input_root, types=['.jpg'])
     if len(inputs) == 0:
         raise (RuntimeError("Found 0 images in : " + input_root))
@@ -75,7 +84,7 @@ def dataset_scan(
     print(len(inputs_set))
 
     if not os.path.isfile(category_file):
-        category_file = os.path.join(input_root, category_file)
+        category_file = os.path.join(dataset_root, category_file)
     category_df = pd.read_csv(category_file)
     category_to_label1 = dict(zip(category_df.category_id, category_df.level1_label))
     category_to_label2 = dict(zip(category_df.category_id, category_df.level2_label))
@@ -89,21 +98,26 @@ def dataset_scan(
         print(len(filtered_targets))
         return filter_inputs, filtered_targets
 
-    if not os.path.isfile(metadata_file):
-        metadata_file = os.path.join(input_root, metadata_file)
-    target_df = pd.read_csv(metadata_file)
-    target_df.set_index(['prod_id'], inplace=True)
-    target_df = target_df[target_df.index.isin(inputs_set)]
+    if has_labels:
+        if not os.path.isfile(metadata_file):
+            metadata_file = os.path.join(input_root, metadata_file)
+        target_df = pd.read_csv(metadata_file)
+        target_df.set_index(['prod_id'], inplace=True)
+        target_df = target_df[target_df.index.isin(inputs_set)]
+
     output = []
-    for s in sets:
+    for s in splits:
         bootstrap = {}
-        if s == 'train':
-            target_df_working = target_df[target_df['cv'] != fold]
+        if has_labels:
+            if s == 'train':
+                target_df_working = target_df[target_df['cv'] != fold]
+            else:
+                target_df_working = target_df[target_df['cv'] == fold]
+            processed_inputs, processed_targets = _setup_dataset(target_df_working)
+            bootstrap['inputs'] = processed_inputs
+            bootstrap['targets'] = processed_targets
         else:
-            target_df_working = target_df[target_df['cv'] == fold]
-        processed_inputs, processed_targets = _setup_dataset(target_df_working)
-        bootstrap['inputs'] = processed_inputs
-        bootstrap['targets'] = processed_targets
+            bootstrap['inputs'] = sorted(inputs, key=lambda x: (x[0], x[1]))
         bootstrap['category_to_label1'] = category_to_label1
         bootstrap['category_to_label2'] = category_to_label2
         bootstrap['category_to_label3'] = category_to_label3
@@ -115,10 +129,11 @@ def dataset_scan(
 class CDiscountDataset(data.Dataset):
     def __init__(
             self,
-            input_root='',
+            root='',
+            split='train',
             metadata_file='prod_metadata.csv',
             category_file='category_map.csv',
-            train=False,
+            is_training=False,
             fold=0,
             img_size=(180, 180),
             normalize='torchvision',
@@ -128,32 +143,36 @@ class CDiscountDataset(data.Dataset):
             multi_target=0):
 
         if bootstrap is None:
-            assert os.path.exists(input_root)
-            sets = ('train',) if train else ('eval',)
-            bootstrap = dataset_scan(input_root, metadata_file, category_file, fold, sets=sets)
+            assert os.path.exists(root)
+            splits = (split,)
+            bootstrap = dataset_scan(
+                root, metadata_file, category_file, fold, splits=splits)
 
         self.category_to_label1 = bootstrap['category_to_label1']
         self.category_to_label2 = bootstrap['category_to_label2']
         self.category_to_label3 = bootstrap['category_to_label3']
+        self.label3_to_category = dict(zip(
+            self.category_to_label3.values(), self.category_to_label3.keys()))
         self.inputs = bootstrap['inputs']
         if 'targets' in bootstrap:
             self.targets = bootstrap['targets']
         else:
             self.targets = None
+            assert not is_training
 
-        self.train = train
+        self.is_training = is_training
         self.img_size = img_size
-        self.crop_factor = 0.95
+        self.crop_factor = 1.0 if img_size[0] == 180 else 0.95
         self.multi_target = multi_target
 
-        if not train:
+        if not is_training:
             self.test_aug = get_test_aug(test_aug)
         else:
             self.test_aug = []
 
         if transform is None:
             tfs = [transforms.ToTensor()]
-            #if self.train:
+            #if self.is_training:
             #    tfs.append(mytransforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05))
             if normalize == 'le':
                 tfs.append(mytransforms.LeNormalize())
@@ -264,11 +283,11 @@ class CDiscountDataset(data.Dataset):
                 c = 0 if vflip else 1
             input_img = cv2.flip(input_img, flipCode=c)
         if scale != 1.0:
-            input_img = cv2.resize(input_img, self.img_size, interpolation=cv2.INTER_LINEAR)
+            input_img = cv2.resize(input_img, self.img_size, interpolation=cv2.INTER_CUBIC)
         return input_img
 
     def __getitem__(self, index):
-        if not self.train and len(self.test_aug) > 1:
+        if not self.is_training and len(self.test_aug) > 1:
             aug_index = index % len(self.test_aug)
             index = index // len(self.test_aug)
         else:
@@ -280,7 +299,7 @@ class CDiscountDataset(data.Dataset):
         if self.targets is not None:
             category_id = self.targets[prod_id]
             target_label = self.category_to_label3[category_id]
-            if self.train and self.multi_target > 1:
+            if self.is_training and self.multi_target > 1:
                 target_label2 = self.category_to_label2[category_id]
                 if self.multi_target == 3:
                     target_label1 = self.category_to_label1[category_id]
@@ -290,11 +309,11 @@ class CDiscountDataset(data.Dataset):
             else:
                 target_tensor = target_label.item()
         else:
-            assert not self.train
+            assert not self.is_training
             target_tensor = torch.zeros(1)
 
         h, w = input_img.shape[:2]
-        if self.train:
+        if self.is_training:
             mid = float(self.img_size[0]) / w
             if self.crop_factor:
                 mid /= self.crop_factor
@@ -321,50 +340,11 @@ class CDiscountDataset(data.Dataset):
     def get_aug_factor(self):
         return len(self.test_aug)
 
-    # def get_class_weights(self):
-    #     return get_class_weights()
-    #
-    # def get_sample_weights(self):
-    #     class_weights = torch.FloatTensor(self.get_class_weights())
-    #     weighted_samples = []
-    #     for index in range(len(self.inputs)):
-    #         masked_weights = self.target_array[index] * class_weights
-    #         weighted_samples.append(masked_weights.max())
-    #     weighted_samples = torch.DoubleTensor(weighted_samples)
-    #     weighted_samples = weighted_samples / weighted_samples.min()
-    #     return weighted_samples
-
-
-class WeightedRandomOverSampler(Sampler):
-    """Over-samples elements from [0,..,len(weights)-1] factor number of times.
-    Each element is sample at least once, the remaining over-sampling is determined
-    by the weights.
-    Arguments:
-        weights (list) : a list of weights, not necessary summing up to one
-        factor (float) : the oversampling factor (>= 1.0)
-    """
-
-    def __init__(self, weights, factor=2.):
-        self.weights = torch.DoubleTensor(weights)
-        assert factor >= 1.
-        self.num_samples = int(len(self.weights) * factor)
-
-    def __iter__(self):
-        base_samples = torch.arange(0, len(self.weights)).long()
-        remaining = self.num_samples - len(self.weights)
-        over_samples = torch.multinomial(self.weights, remaining, True)
-        samples = torch.cat((base_samples, over_samples), dim=0)
-        print('num samples', len(samples))
-        return (samples[i] for i in torch.randperm(len(samples)))
-
-    def __len__(self):
-        return self.num_samples
-
 
 def test():
     dataset = CDiscountDataset(
         '/data/f/cdiscount/train',
-        train=True
+        is_training=True
     )
 
     stats = []
