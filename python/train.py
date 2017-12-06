@@ -157,7 +157,7 @@ def main():
 
     dataset_train = CDiscountDataset(
         bootstrap=bootstrap[0],
-        train=True,
+        is_training=True,
         img_size=img_size,
         fold=args.fold,
         normalize=normalize,
@@ -179,7 +179,7 @@ def main():
 
     dataset_eval = CDiscountDataset(
         bootstrap=bootstrap[1],
-        train=False,
+        is_training=False,
         img_size=img_size,
         test_aug=args.tta,
         fold=args.fold,
