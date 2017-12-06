@@ -204,7 +204,7 @@ class DualPathBlock(nn.Module):
 class DPN(nn.Module):
     def __init__(self, small=False, num_init_features=64, k_r=96, groups=32,
                  b=False, k_sec=(3, 4, 20, 3), inc_sec=(16, 32, 24, 128),
-                 num_classes=1000, test_time_pool=False):
+                 num_classes=1000, test_time_pool=False, fc_act=nn.ReLU(inplace=True)):
         super(DPN, self).__init__()
         self.num_classes = num_classes
         self.test_time_pool = test_time_pool
@@ -258,7 +258,7 @@ class DPN(nn.Module):
         for i in range(2, k_sec[3] + 1):
             blocks['conv5_' + str(i)] = DualPathBlock(in_chs, r, r, bw, inc, groups, 'normal', b)
             in_chs += inc
-        blocks['conv5_bn_ac'] = CatBnAct(in_chs)
+        blocks['conv5_bn_ac'] = CatBnAct(in_chs, activation_fn=fc_act)
         self.num_features = in_chs
         self.features = nn.Sequential(blocks)
 

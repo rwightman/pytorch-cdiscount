@@ -37,8 +37,6 @@ parser.add_argument('--opt', default='sgd', type=str, metavar='OPTIMIZER',
                     help='Optimizer (default: "sgd"')
 parser.add_argument('--opt-eps', default=1e-8, type=float, metavar='EPSILON',
                     help='Optimizer Epsilon (default: 1e-8)')
-parser.add_argument('--loss', default='mlsm', type=str, metavar='LOSS',
-                    help='Loss function (default: "nll"')
 parser.add_argument('--gp', default='avg', type=str, metavar='POOL',
                     help='Type of global pool, "avg", "max", "avgmax", "avgmaxc" (default: "avg")')
 parser.add_argument('--tta', type=int, default=0, metavar='N',
@@ -71,7 +69,7 @@ parser.add_argument('--ft-opt', default='sgd', type=str, metavar='OPTIMIZER',
                     help='Optimizer (default: "sgd"')
 parser.add_argument('--ft-lr', type=float, default=0.0001, metavar='N',
                     help='Finetune learning rates.')
-parser.add_argument('--drop', type=float, default=0.1, metavar='DROP',
+parser.add_argument('--drop', type=float, default=0.0, metavar='DROP',
                     help='Dropout rate (default: 0.1)')
 parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
                     help='learning rate (default: 0.01)')
@@ -152,7 +150,7 @@ def main():
 
     if args.multi_target:
         if args.multi_target == 2:
-            model = multi_target.MultiTargetModel(model, [5270, 483])
+            model = multi_target.MultiTargetModel(model, [5270, 483], cascade=True)
         elif args.multi_target == 3:
             model = multi_target.MultiTargetModel(model, [5270, 483, 49])
         else:
@@ -206,46 +204,45 @@ def main():
         num_workers=args.workers
     )
 
+    train_loss_fn = validate_loss_fn = torch.nn.CrossEntropyLoss()
+    if isinstance(model, multi_target.MultiTargetModel):
+        if args.multi_target == 3:
+            mt_scales = [0.8, 0.1, 0.1]
+        else:
+            mt_scales = [0.9, 0.1]
+        train_loss_fn = multi_target.MultiTargetLoss(fixed_scales=mt_scales, loss_fn=train_loss_fn)
+        #train_loss_fn = multi_target.MultiTargetLoss(learnable=3, loss_fn=train_loss_fn)
+    train_loss_fn = train_loss_fn.cuda()
+    validate_loss_fn = validate_loss_fn.cuda()
+
+    opt_params = list(model.parameters())
+    if train_loss_fn.learnable:
+        opt_params += list(train_loss_fn.parameters())
     if args.opt.lower() == 'sgd':
         optimizer = optim.SGD(
-            model.parameters(), lr=args.lr,
+            opt_params, lr=args.lr,
             momentum=args.momentum, weight_decay=args.weight_decay, nesterov=True)
     elif args.opt.lower() == 'adam':
         optimizer = optim.Adam(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
+            opt_params, lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
     elif args.opt.lower() == 'nadam':
         optimizer = nadam.Nadam(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
+            opt_params, lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
     elif args.opt.lower() == 'adadelta':
         optimizer = optim.Adadelta(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
+            opt_params, lr=args.lr, weight_decay=args.weight_decay, eps=args.opt_eps)
     elif args.opt.lower() == 'rmsprop':
         optimizer = optim.RMSprop(
-            model.parameters(), lr=args.lr, alpha=0.9, eps=args.opt_eps,
+            opt_params, lr=args.lr, alpha=0.9, eps=args.opt_eps,
             momentum=args.momentum, weight_decay=args.weight_decay)
     else:
         assert False and "Invalid optimizer"
+    del opt_params
 
     if not args.decay_epochs:
         lr_scheduler = ReduceLROnPlateau(optimizer, patience=8)
     else:
         lr_scheduler = None
-
-    if args.class_weights:
-        class_weights = torch.from_numpy(dataset_train.get_class_weights()).float().cuda()
-        class_weights_norm = class_weights / class_weights.sum()
-        class_weights_norm = class_weights_norm.cuda()
-    else:
-        class_weights = None
-        class_weights_norm = None
-
-    train_loss_fn = validate_loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights).cuda()
-    if isinstance(model, multi_target.MultiTargetModel):
-        if args.multi_target == 3:
-            mt_scales = [1.0, 0.3, 0.2]
-        else:
-            mt_scales = [1.0, 0.1]
-        train_loss_fn = multi_target.MultiTargetLoss(scales=mt_scales, loss_fn=train_loss_fn)
 
     # optionally resume from a checkpoint
     start_epoch = 0 if args.start_epoch is None else args.start_epoch
@@ -260,9 +257,13 @@ def main():
                     print("Loading sparse model")
                     # ensure sparsity_masks exist in model definition before loading state
                     dense_sparse_dense.sparsify(model, sparsity=0.)
-
+                if 'args' in checkpoint:
+                    print(checkpoint['args'])
                 model.load_state_dict(checkpoint['state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer'])
+                if 'optimizer' in checkpoint:
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                if 'loss' in checkpoint:
+                    train_loss_fn.load_state_dict(checkpoint['loss'])
                 print("=> loaded checkpoint '{}' (epoch {})".format(args.resume, checkpoint['epoch']))
                 start_epoch = checkpoint['epoch'] if args.start_epoch is None else args.start_epoch
             else:
@@ -360,6 +361,7 @@ def main():
                 'sparse': args.sparse,
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
+                'loss': train_loss_fn.state_dict(),
                 'args': args,
                 'gp': args.gp,
                 },
