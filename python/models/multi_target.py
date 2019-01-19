@@ -32,7 +32,7 @@ class MultiTargetLoss(nn.Module):
             else:
                 scales = self.fixed_scales
             losses = [s * self.loss_fn(i, t) for i, t, s in zip(inputs, targets, scales)]
-            return torch.sum(torch.cat(losses))
+            return sum(losses)
 
 
 class MultiTargetLayer(nn.Module):

@@ -22,6 +22,8 @@ import torch.optim as optim
 import torch.utils.data as data
 import torchvision.utils
 
+torch.backends.cudnn.benchmark = True
+
 parser = argparse.ArgumentParser(description='Training')
 parser.add_argument('data', metavar='DIR',
                     help='path to dataset')
@@ -401,16 +403,16 @@ def train_epoch(
         step = epoch_step + batch_idx
         data_time_m.update(time.time() - end)
 
-        input_var = autograd.Variable(input.cuda())
+        input = input.cuda()
         if isinstance(target, list):
-            target_var = [autograd.Variable(t.cuda()) for t in target]
+            target = [t.cuda() for t in target]
         else:
-            target_var = autograd.Variable(target.cuda())
+            target = target.cuda()
 
-        output = model(input_var)
+        output = model(input)
 
-        loss = loss_fn(output, target_var)
-        losses_m.update(loss.data[0], input_var.size(0))
+        loss = loss_fn(output, target)
+        losses_m.update(loss.item(), input.size(0))
 
         optimizer.zero_grad()
         loss.backward()
@@ -431,8 +433,8 @@ def train_epoch(
                 100. * batch_idx / len(loader),
                 loss=losses_m,
                 batch_time=batch_time_m,
-                rate=input_var.size(0) / batch_time_m.val,
-                rate_avg=input_var.size(0) / batch_time_m.avg,
+                rate=input.size(0) / batch_time_m.val,
+                rate_avg=input.size(0) / batch_time_m.avg,
                 data_time=data_time_m))
 
             if args.save_batches:
@@ -472,50 +474,53 @@ def validate(step, model, loader, loss_fn, args, output_dir=''):
     model.eval()
 
     end = time.time()
-    for i, (input, target, _) in enumerate(loader):
-        input_var = autograd.Variable(input.cuda(), volatile=True)
-        if isinstance(target, list):
-            target = target[0]
-        target_var = autograd.Variable(target.cuda(), volatile=True)
 
-        output = model(input_var)
+    with torch.no_grad():
+        for i, (input, target, _) in enumerate(loader):
+            input = input.cuda()
+            if isinstance(target, list):
+                target = target[0].cuda()
+            else:
+                target = target.cuda()
 
-        if isinstance(output, list):
-            output = output[0]
+            output = model(input)
 
-        # augmentation reduction
-        reduce_factor = loader.dataset.get_aug_factor()
-        if reduce_factor > 1:
-            output.data = output.data.unfold(0, reduce_factor, reduce_factor).mean(dim=2)
-            target_var.data = target_var.data[0:target_var.size(0):reduce_factor]
+            if isinstance(output, list):
+                output = output[0]
 
-        # calc loss
-        loss = loss_fn(output, target_var)
-        losses_m.update(loss.data[0], input.size(0))
+            # augmentation reduction
+            reduce_factor = loader.dataset.get_aug_factor()
+            if reduce_factor > 1:
+                output = output.unfold(0, reduce_factor, reduce_factor).mean(dim=2)
+                target = target[0:target.size(0):reduce_factor]
 
-        # metrics
-        prec1, prec5 = accuracy(output.data, target_var.data, topk=(1, 3))
-        prec1_m.update(prec1[0], output.size(0))
-        prec5_m.update(prec5[0], output.size(0))
+            # calc loss
+            loss = loss_fn(output, target)
+            losses_m.update(loss.item(), input.size(0))
 
-        batch_time_m.update(time.time() - end)
-        end = time.time()
-        if i % args.print_freq == 0:
-            print('Test: [{0}/{1}]\t'
-                  'Time {batch_time.val:.3f} ({batch_time.avg:.3f})  '
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})  '
-                  'Prec@1 {top1.val:.4f} ({top1.avg:.4f})  '
-                  'Prec@5 {top5.val:.4f} ({top5.avg:.4f})'.format(
-                i, len(loader),
-                batch_time=batch_time_m, loss=losses_m,
-                top1=prec1_m, top5=prec5_m))
+            # metrics
+            prec1, prec5 = accuracy(output, target, topk=(1, 3))
+            prec1_m.update(prec1.item(), output.size(0))
+            prec5_m.update(prec5.item(), output.size(0))
 
-            if args.save_batches:
-                torchvision.utils.save_image(
-                    input,
-                    os.path.join(output_dir, 'validate-batch-%d.jpg' % i),
-                    padding=0,
-                    normalize=True)
+            batch_time_m.update(time.time() - end)
+            end = time.time()
+            if i % args.print_freq == 0:
+                print('Test: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})  '
+                      'Loss {loss.val:.4f} ({loss.avg:.4f})  '
+                      'Prec@1 {top1.val:.4f} ({top1.avg:.4f})  '
+                      'Prec@5 {top5.val:.4f} ({top5.avg:.4f})'.format(
+                    i, len(loader),
+                    batch_time=batch_time_m, loss=losses_m,
+                    top1=prec1_m, top5=prec5_m))
+
+                if args.save_batches:
+                    torchvision.utils.save_image(
+                        input,
+                        os.path.join(output_dir, 'validate-batch-%d.jpg' % i),
+                        padding=0,
+                        normalize=True)
 
     metrics = OrderedDict([('eval_loss', losses_m.avg), ('eval_prec1', prec1_m.avg)])
 
