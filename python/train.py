@@ -139,6 +139,7 @@ def main():
         checkpoint_path=args.initial_checkpoint)
 
     if args.multi_target:
+        print('Creating multi-target model')
         if args.multi_target == 2:
             model = multi_target.MultiTargetModel(model, [5270, 483], cascade=True)
         elif args.multi_target == 3:
@@ -148,12 +149,11 @@ def main():
     else:
         model.reset_classifier(num_classes=num_classes)
 
-    if args.num_gpu > 1:
-        model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu))).cuda()
-    else:
-        model.cuda()
-
-    bootstrap = dataset_scan(train_input_root)
+    bootstrap = dataset_scan(
+        train_input_root,
+        metadata_file='prod_metadata-l2_6.csv',
+        category_file='category_map-l2_6.csv'
+    )
 
     dataset_train = CDiscountDataset(
         bootstrap=bootstrap[0],
@@ -195,7 +195,8 @@ def main():
     )
 
     train_loss_fn = validate_loss_fn = torch.nn.CrossEntropyLoss()
-    if isinstance(model, multi_target.MultiTargetModel):
+    if args.multi_target:
+        print('Creating multi-target loss')
         if args.multi_target == 3:
             mt_scales = [0.8, 0.1, 0.1]
         else:
@@ -206,7 +207,7 @@ def main():
     validate_loss_fn = validate_loss_fn.cuda()
 
     opt_params = list(model.parameters())
-    if train_loss_fn.learnable:
+    if args.multi_target and train_loss_fn.learnable:
         opt_params += list(train_loss_fn.parameters())
     if args.opt.lower() == 'sgd':
         optimizer = optim.SGD(
@@ -249,7 +250,14 @@ def main():
                     dense_sparse_dense.sparsify(model, sparsity=0.)
                 if 'args' in checkpoint:
                     print(checkpoint['args'])
-                model.load_state_dict(checkpoint['state_dict'])
+                new_state_dict = OrderedDict()
+                for k, v in checkpoint['state_dict'].items():
+                    if k.startswith('module'):
+                        name = k[7:] # remove `module.`
+                    else:
+                        name = k
+                    new_state_dict[name] = v
+                model.load_state_dict(new_state_dict)
                 if 'optimizer' in checkpoint:
                     optimizer.load_state_dict(checkpoint['optimizer'])
                 if 'loss' in checkpoint:
@@ -269,6 +277,11 @@ def main():
         dense_sparse_dense.densify(model)
 
     saver = CheckpointSaver(checkpoint_dir=output_dir)
+
+    if args.num_gpu > 1:
+        model = torch.nn.DataParallel(model, device_ids=list(range(args.num_gpu))).cuda()
+    else:
+        model.cuda()
 
     # Optional fine-tune of only the final classifier weights for specified number of epochs (or part of)
     if not args.resume and args.ft_epochs > 0.:

@@ -303,11 +303,11 @@ class CDiscountDataset(data.Dataset):
                 target_label2 = self.category_to_label2[category_id]
                 if self.multi_target == 3:
                     target_label1 = self.category_to_label1[category_id]
-                    target_tensor = [target_label.item(), target_label2.item(), target_label1.item()]
+                    target_tensor = [target_label, target_label2, target_label1]
                 else:
-                    target_tensor = [target_label.item(), target_label2.item()]
+                    target_tensor = [target_label, target_label2]
             else:
-                target_tensor = target_label.item()
+                target_tensor = target_label
         else:
             assert not self.is_training
             target_tensor = torch.zeros(1)

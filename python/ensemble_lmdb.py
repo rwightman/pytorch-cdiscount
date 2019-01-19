@@ -35,12 +35,19 @@ def main():
     envs = [lmdb.open(d, sync=False, readahead=False, readonly=True, lock=False) for d in dirs]
     txns = [e.begin() for e in envs]
     cursors = [t.cursor() for t in txns]
+    num_sources = len(envs)
     probs = []
     prev_prod_id = -1
     written = 0
 
     def _write_result():
-        result = np.mean(probs, axis=0)
+        if num_sources == len(probs):
+            result = np.mean(probs, axis=0)
+        else:
+            probs_arr = np.array(probs)
+            for i in range(num_sources):
+                probs_arr[-i] *= 2.0
+            result = np.sum(probs_arr, axis=0)
         top1_label = np.argmax(result)
         writer.writerow([prev_prod_id, categories[top1_label] if categories else top1_label])
 
@@ -50,7 +57,7 @@ def main():
             fetches = [i.__next__() for i in iters]
             for i, (k, v) in enumerate(fetches):
                 prod_id, img_id = struct.unpack('>IB', k)
-                if written % 1000 == 0:
+                if written % 1000 == 0 and i == 0:
                     print(prod_id, img_id)
                 if prev_prod_id > 0 and (i == 0 and prod_id != prev_prod_id):
                     _write_result()
